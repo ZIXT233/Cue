@@ -1,0 +1,69 @@
+import { desktopBridge } from "./desktop";
+
+const CARD_ID = /^[a-zA-Z0-9-]{1,100}$/;
+
+export function cardWindowLabel(cardId: string) {
+  return `card-${cardId}`;
+}
+
+export async function openDetachedCardWindow(cardId: string): Promise<boolean> {
+  if (!CARD_ID.test(cardId)) return false;
+  const { LogicalPosition } = await import("@tauri-apps/api/dpi");
+  const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+  type BackgroundThrottlingPolicy = import("@tauri-apps/api/window").BackgroundThrottlingPolicy;
+  const label = cardWindowLabel(cardId);
+  const existing = await WebviewWindow.getByLabel(label);
+  if (existing) {
+    await existing.unminimize();
+    await existing.show();
+    await existing.setFocus();
+    return true;
+  }
+  const webview = new WebviewWindow(label, {
+    url: `/?card=${encodeURIComponent(cardId)}`,
+    title: "Cue",
+    width: 1200,
+    height: 900,
+    minWidth: 720,
+    minHeight: 540,
+    hiddenTitle: true,
+    titleBarStyle: "overlay",
+    trafficLightPosition: new LogicalPosition(24, 25),
+    backgroundThrottling: "disabled" as BackgroundThrottlingPolicy,
+    focus: true,
+  });
+  return await new Promise((resolve) => {
+    void webview.once("tauri://created", () => resolve(true));
+    void webview.once("tauri://error", () => resolve(false));
+  });
+}
+
+export async function focusMainWindow() {
+  const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+  const main = await WebviewWindow.getByLabel("main");
+  if (!main) return;
+  await main.unminimize();
+  await main.show();
+  await main.setFocus();
+}
+
+export async function closeCurrentCardWindow() {
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  await getCurrentWindow().destroy();
+}
+
+export async function destroyCardWindow(cardId: string) {
+  if (!CARD_ID.test(cardId)) return;
+  const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+  const existing = await WebviewWindow.getByLabel(cardWindowLabel(cardId));
+  if (existing) await existing.destroy();
+}
+
+export async function setCurrentWindowTitle(title: string) {
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  await getCurrentWindow().setTitle(title);
+}
+
+export function isDesktopApp() {
+  return !!desktopBridge();
+}

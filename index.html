@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en" translate="no" class="notranslate">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="google" content="notranslate" />
+    <title>Cue — Queue of Agent Cues</title>
+    <script>
+      (function () {
+        var t = "auto";
+        try {
+          var s = (window.topcardDesktop && window.topcardDesktop.storage
+            ? window.topcardDesktop.storage
+            : localStorage
+          ).getItem("pi-theme");
+          if (["light", "dark", "auto"].includes(s)) t = s;
+        } catch (e) {}
+        if (t === "auto") t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        var r = document.documentElement;
+        r.dataset.theme = t;
+        r.classList.toggle("dark", t === "dark");
+        if (window.__TAURI_INTERNALS__) {
+          r.classList.add("topcard-desktop");
+          r.dataset.desktopPlatform = /Mac/i.test(navigator.userAgent)
+            ? "darwin"
+            : /Win/i.test(navigator.userAgent)
+              ? "win32"
+              : "linux";
+        }
+      })();
+    </script>
+  </head>
+  <body translate="no" class="notranslate">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

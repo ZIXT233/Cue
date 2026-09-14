@@ -1,0 +1,360 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { clearEnsuringSideTerminal, dropCardSideTerminal, peekEnsuringSideTerminal, persistCardSideTerminal, persistCardSideTerminalOpen, rememberCardSideTerminals, rememberEnsuringSideTerminal, sideTerminalsFromCard, type CardSideTerminalRef } from "@/lib/card-side-terminals";
+import { useResizablePanel } from "@/hooks/useResizablePanel";
+import { useI18n } from "@/hooks/useI18n";
+import { TerminalPanel } from "./TerminalPanel";
+import { newTerminalTab, type TerminalTab } from "./terminal-tab-state";
+
+const MIN_WIDTH = 280;
+const MAX_WIDTH = 720;
+const DEFAULT_WIDTH = 380;
+
+export function useCardExtraTerminals({
+  cardId,
+  cwd,
+  enabled,
+  saved,
+}: {
+  cardId: string;
+  cwd: string;
+  enabled: boolean;
+  saved?: CardSideTerminalRef[];
+}) {
+  const dropped = useRef(new Set<string>());
+  const [tabs, setTabs] = useState<TerminalTab[]>(() => sideTerminalsFromCard(saved, cwd));
+  const [activeId, setActiveId] = useState<string | null>(() => sideTerminalsFromCard(saved, cwd)[0]?.id ?? peekEnsuringSideTerminal(cardId)?.id ?? null);
+  const savedKey = (saved ?? []).map((tab) => tab.id).join(",");
+
+  useEffect(() => {
+    for (const id of [...dropped.current]) {
+      if (!(saved ?? []).some((tab) => tab.id === id)) dropped.current.delete(id);
+    }
+    const incoming = sideTerminalsFromCard(saved, cwd).filter((tab) => !dropped.current.has(tab.id));
+    setTabs((current) => {
+      const incomingIds = new Set(incoming.map((tab) => tab.id));
+      const optimistic = current.filter((tab) => !incomingIds.has(tab.id) && !tab.restored && !dropped.current.has(tab.id));
+      const merged = [...incoming, ...optimistic];
+      return merged.length === current.length && merged.every((tab, index) => tab.id === current[index]?.id)
+        ? current
+        : merged;
+    });
+    setActiveId((current) => {
+      if (current && incoming.some((tab) => tab.id === current)) return current;
+      return incoming[0]?.id ?? current;
+    });
+    if (incoming.some((tab) => tab.id === peekEnsuringSideTerminal(cardId)?.id)) {
+      clearEnsuringSideTerminal(cardId);
+    }
+  }, [cardId, cwd, saved, savedKey]);
+
+  useEffect(() => {
+    if (enabled) rememberCardSideTerminals(cardId, tabs.map((tab) => tab.id));
+  }, [cardId, enabled, tabs]);
+
+  const dropTab = useCallback((id: string, nextCwd = cwd) => {
+    dropped.current.add(id);
+    dropCardSideTerminal(cardId, { id, cwd: nextCwd });
+    setTabs((current) => {
+      const remaining = current.filter((tab) => tab.id !== id);
+      setActiveId((active) => active === id ? remaining.at(-1)?.id ?? null : active);
+      return remaining;
+    });
+  }, [cardId, cwd]);
+
+  const addTab = useCallback(() => {
+    if (!enabled) return null;
+    const tab = newTerminalTab(cwd);
+    dropped.current.delete(tab.id);
+    setTabs((current) => [...current, tab]);
+    setActiveId(tab.id);
+    void persistCardSideTerminal(cardId, tab, "add");
+    return tab;
+  }, [cardId, cwd, enabled]);
+
+  const ensureTab = useCallback(() => {
+    if (!enabled) return;
+    setTabs((current) => {
+      if (current.length > 0) return current;
+      const incoming = sideTerminalsFromCard(saved, cwd).filter((tab) => !dropped.current.has(tab.id));
+      if (incoming.length > 0) {
+        setActiveId(incoming[0].id);
+        return incoming;
+      }
+      const pending = peekEnsuringSideTerminal(cardId);
+      if (pending && !dropped.current.has(pending.id)) {
+        setActiveId(pending.id);
+        return [pending];
+      }
+      const tab = newTerminalTab(cwd);
+      rememberEnsuringSideTerminal(cardId, tab);
+      setActiveId(tab.id);
+      void persistCardSideTerminal(cardId, tab, "add");
+      return [tab];
+    });
+  }, [cardId, cwd, enabled, saved]);
+
+  const closeTab = useCallback((id: string) => {
+    const tab = tabs.find((item) => item.id === id);
+    dropTab(id, tab?.cwd);
+  }, [dropTab, tabs]);
+
+  const restartTab = useCallback((id: string) => {
+    const tab = tabs.find((item) => item.id === id);
+    dropTab(id, tab?.cwd);
+    addTab();
+  }, [addTab, dropTab, tabs]);
+
+  return { tabs, activeId, setActiveId, addTab, ensureTab, closeTab, restartTab, dropTab };
+}
+
+export function TerminalTabBar({
+  tabs,
+  activeId,
+  onSelect,
+  onClose,
+  onAdd,
+  disabled,
+}: {
+  tabs: TerminalTab[];
+  activeId: string | null;
+  onSelect: (id: string) => void;
+  onClose: (id: string) => void;
+  onAdd: () => void;
+  disabled?: boolean;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="cq-terminal-tabs" role="tablist" aria-label={t("terminal.title")}>
+      <div className="cq-terminal-tab-list">
+        {tabs.map((tab, index) => (
+          <div key={tab.id} className="cq-terminal-tab" data-active={tab.id === activeId} role="presentation">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab.id === activeId}
+              className="cq-terminal-tab-select"
+              onClick={() => onSelect(tab.id)}
+            >
+              {t("terminal.tabLabel", { name: String(index + 1) })}
+            </button>
+            <button
+              type="button"
+              className="cq-terminal-tab-close"
+              disabled={disabled}
+              aria-label={t("terminal.close")}
+              title={t("terminal.close")}
+              onClick={() => onClose(tab.id)}
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+      <button
+        type="button"
+        className="cq-terminal-tab-add"
+        disabled={disabled}
+        aria-label={t("terminal.newTab")}
+        title={t("terminal.newTab")}
+        onClick={onAdd}
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
+export function CardExtraTerminalPanes({
+  tabs,
+  activeId,
+  active,
+  onRestart,
+  onUnavailable,
+}: {
+  tabs: TerminalTab[];
+  activeId: string | null;
+  active: boolean;
+  onRestart: (id: string) => void;
+  onUnavailable: (id: string) => void;
+}) {
+  return tabs.map((tab) => (
+    <div key={tab.id} className="cq-side-terminal-body" hidden={tab.id !== activeId}>
+      <TerminalPanel
+        embedded
+        tab={tab}
+        active={active && tab.id === activeId}
+        onRestart={() => onRestart(tab.id)}
+        onClosed={() => {}}
+        onCloseError={() => {}}
+        onUnavailable={() => onUnavailable(tab.id)}
+      />
+    </div>
+  ));
+}
+
+export function CardSideTerminal({
+  cardId,
+  cwd,
+  remote,
+  active,
+  enabled,
+  saved,
+  savedOpen,
+  children,
+}: {
+  cardId: string;
+  cwd: string;
+  remote: boolean;
+  active: boolean;
+  enabled: boolean;
+  saved?: CardSideTerminalRef[];
+  savedOpen?: boolean;
+  children: (ui: { button: ReactNode; panel: ReactNode }) => ReactNode;
+}) {
+  const ui = useCardSideTerminal({ cardId, cwd, remote, active, enabled, saved, savedOpen });
+  return children(ui);
+}
+
+function useCardSideTerminal({
+  cardId,
+  cwd,
+  remote,
+  active,
+  enabled,
+  saved,
+  savedOpen,
+}: {
+  cardId: string;
+  cwd: string;
+  remote: boolean;
+  active: boolean;
+  enabled: boolean;
+  saved?: CardSideTerminalRef[];
+  savedOpen?: boolean;
+}) {
+  const { t } = useI18n();
+  const extras = useCardExtraTerminals({ cardId, cwd, enabled, saved });
+  const [open, setOpen] = useState(!!savedOpen);
+  const lastSavedOpen = useRef(!!savedOpen);
+  useEffect(() => {
+    if (lastSavedOpen.current === !!savedOpen) return;
+    lastSavedOpen.current = !!savedOpen;
+    setOpen(!!savedOpen);
+  }, [savedOpen]);
+  useEffect(() => {
+    if (open && !remote) extras.ensureTab();
+  }, [open, remote, extras.ensureTab]);
+  const widthRef = useRef(DEFAULT_WIDTH);
+  const maxWidth = useCallback(() => {
+    if (typeof window === "undefined") return MAX_WIDTH;
+    return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(window.innerWidth * 0.45)));
+  }, []);
+  const resize = useResizablePanel({
+    ariaLabel: t("queue.resizeSideTerminal"),
+    cssVariable: "--cq-side-terminal-width",
+    defaultWidth: DEFAULT_WIDTH,
+    getMaxWidth: maxWidth,
+    growthDirection: "left",
+    maxWidth: MAX_WIDTH,
+    minWidth: MIN_WIDTH,
+    storageKey: "cue:card-side-terminal-width",
+    widthRef,
+  });
+
+  const setPanelOpen = (next: boolean) => {
+    setOpen(next);
+    void persistCardSideTerminalOpen(cardId, next);
+    if (next) extras.ensureTab();
+  };
+
+  const toggle = () => {
+    if (remote) return;
+    setPanelOpen(!open);
+  };
+
+  const closeTab = (id: string) => {
+    extras.closeTab(id);
+    if (extras.tabs.filter((tab) => tab.id !== id).length === 0) setPanelOpen(false);
+  };
+
+  const button = enabled ? (
+    <SideTerminalButton
+      disabled={remote}
+      pressed={open}
+      label={remote ? t("queue.remoteToolsUnavailable") : t("queue.sideTerminal")}
+      onClick={toggle}
+    />
+  ) : null;
+
+  const panel = enabled && extras.tabs.length > 0 ? (
+    <>
+      {open && <div {...resize.separatorProps} className={`panel-resize-handle cq-side-terminal-resize${resize.isResizing ? " is-resizing" : ""}`} />}
+      <aside
+        ref={resize.panelRef}
+        className="cq-card-side-terminal"
+        hidden={!open}
+        style={{ "--cq-side-terminal-width": `${resize.width}px` } as CSSProperties}
+        aria-label={t("queue.sideTerminal")}
+      >
+        <div className="cq-side-terminal-heading">
+          <TerminalTabBar
+            tabs={extras.tabs}
+            activeId={extras.activeId}
+            onSelect={extras.setActiveId}
+            onClose={closeTab}
+            onAdd={() => extras.addTab()}
+            disabled={remote}
+          />
+        </div>
+        <CardExtraTerminalPanes
+          tabs={extras.tabs}
+          activeId={extras.activeId}
+          active={active && open}
+          onRestart={extras.restartTab}
+          onUnavailable={(id) => extras.dropTab(id)}
+        />
+      </aside>
+    </>
+  ) : null;
+
+  return { button, panel, open };
+}
+
+export function SideTerminalButton({
+  disabled,
+  pressed,
+  label,
+  onClick,
+}: {
+  disabled?: boolean;
+  pressed?: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <button
+      type="button"
+      className="cq-tools-trigger cq-side-terminal-trigger"
+      disabled={disabled}
+      aria-pressed={pressed}
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+    >
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m4 5 7 7-7 7M14 19h6" /></svg>
+      <span>{t("terminal.title")}</span>
+    </button>
+  );
+}
+
+export function CardWorkspace({ children, side }: { children: ReactNode; side?: ReactNode }) {
+  return (
+    <div className="cq-card-workspace">
+      <div className="cq-card-main">{children}</div>
+      {side}
+    </div>
+  );
+}

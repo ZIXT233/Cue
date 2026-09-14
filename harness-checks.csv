@@ -1,0 +1,10 @@
+harness,消息发送,普通回复,ask,perm,resume同步,标题
+codex,正常,正常,正常,正常,正常,事件时读session文件：thread_name → 会话第一条prompt → hook最后一次prompt → Codex · 工作区
+claude,正常,正常,正常,,正常,事件时读session文件：custom-title → 会话第一条prompt → hook最后一次prompt → Claude Code · 工作区
+cursor,正常,正常,选择后不会自动进入队列,正常,不通过（之后考虑手动同步按钮）,事件时读session文件：meta.title → prompt_history首条 → hook最后一次prompt → Cursor Agent · 工作区
+pi,正常,正常,正常,正常,正常,事件时读session文件：session_info.name → 会话第一条prompt → hook最后一次prompt → Pi CLI · 工作区
+omp,正常,正常,正常,正常,正常,事件时读session文件：title → session_info.name → 会话第一条prompt → hook最后一次prompt → Oh My Pi · 工作区
+grok,正常,正常,正常,正常,正常,事件时读session文件：summary.generated_title → 会话第一条prompt → hook最后一次prompt → Grok Build · 工作区
+antigravity,,,,,,无稳定session文件：hook最后一次prompt → Antigravity CLI · 工作区
+opencode,正常,正常,正常,正常,正常,稳定OSC info.title → hook最后一次prompt → OpenCode · 工作区
+shell,,,,,,工作区名

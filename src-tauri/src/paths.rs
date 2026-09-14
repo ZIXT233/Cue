@@ -1,0 +1,97 @@
+use std::path::{Path, PathBuf};
+
+pub fn data_dir() -> PathBuf {
+    if let Ok(path) = std::env::var("CUE_DATA_DIR").or_else(|_| std::env::var("TOPCARD_DATA_DIR")) {
+        return PathBuf::from(path);
+    }
+    dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".cue")
+}
+
+pub fn queue_file() -> PathBuf {
+    if let Ok(path) = std::env::var("CUE_QUEUE_FILE").or_else(|_| std::env::var("TOPCARD_QUEUE_FILE")) {
+        return PathBuf::from(path);
+    }
+    data_dir().join("queue.json")
+}
+
+pub fn remote_hosts_file() -> PathBuf {
+    data_dir().join("remote-hosts.json")
+}
+
+pub fn remote_host_visibility_file() -> PathBuf {
+    data_dir().join("remote-host-visibility.json")
+}
+
+pub fn settings_file() -> PathBuf {
+    data_dir().join("settings.json")
+}
+
+pub fn signal_dir(terminal_id: &str) -> PathBuf {
+    data_dir().join("harness-signals").join(terminal_id)
+}
+
+pub fn plugin_root(kind: &str) -> PathBuf {
+    data_dir().join("harness-plugins").join(kind)
+}
+
+pub fn ssh_runtime_dir(workspace_id: &str) -> PathBuf {
+    data_dir().join("ssh").join(workspace_id)
+}
+
+pub fn expand_user(path: &str) -> PathBuf {
+    if let Some(rest) = path.strip_prefix("~/") {
+        return dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(rest);
+    }
+    if path == "~" {
+        return dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    }
+    PathBuf::from(path)
+}
+
+pub fn atomic_write(path: &Path, body: &str) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = parent_tmp(path);
+    std::fs::write(&tmp, body)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+    }
+    std::fs::rename(tmp, path)?;
+    Ok(())
+}
+
+fn parent_tmp(path: &Path) -> PathBuf {
+    let name = format!(
+        ".{}.{}.tmp",
+        path.file_name().and_then(|s| s.to_str()).unwrap_or("file"),
+        std::process::id()
+    );
+    path.parent().unwrap_or_else(|| Path::new(".")).join(name)
+}
+
+pub fn resolve_bin_dir(resource_dir: Option<PathBuf>) -> PathBuf {
+    if let Ok(path) = std::env::var("CUE_BIN_DIR") {
+        return PathBuf::from(path);
+    }
+    if let Some(dir) = resource_dir {
+        let candidate = dir.join("resources").join("bin");
+        if candidate.exists() {
+            return candidate;
+        }
+        let candidate = dir.join("bin");
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    if cwd.join("bin").join("harness-hook.cjs").exists() {
+        return cwd.join("bin");
+    }
+    if cwd.join("src-tauri").join("resources").join("bin").join("harness-hook.cjs").exists() {
+        return cwd.join("src-tauri").join("resources").join("bin");
+    }
+    cwd.join("bin")
+}
