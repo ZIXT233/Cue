@@ -58,12 +58,12 @@ export function WorkspacePicker({ workspaces, remoteHosts, onSelect, onUpdate, o
     try {
       await machineRequest({ action: "test-host", host: host.id, ...(password !== undefined ? { password } : {}), ...(trustedPrompt !== undefined ? { trustedPrompt } : {}) }, controller.signal);
       if (controller.signal.aborted) return;
-      window.dispatchEvent(new Event("topcard-remote-hosts-changed"));
+      window.dispatchEvent(new Event("cue-remote-hosts-changed"));
       setConnectingWorkspace(null); onSelect(workspace.id);
     } catch (error) {
       if (controller.signal.aborted) return;
       setConnectingWorkspace({ workspace, host, error });
-      window.dispatchEvent(new Event("topcard-remote-hosts-changed"));
+      window.dispatchEvent(new Event("cue-remote-hosts-changed"));
       presentConnectionChallenge(error);
     } finally {
       if (connectionController.current === controller) { connectionController.current = null; setConnectionBusy(false); }

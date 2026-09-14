@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 export interface TerminalTranscript { cwd: string; output: string; exitCode: number | null }
-const directory = () => join(process.env.TOPCARD_DATA_DIR || join(process.cwd(), ".topcard"), "terminal-transcripts");
+const directory = () => join(process.env.CUE_DATA_DIR || join(process.cwd(), ".cue"), "terminal-transcripts");
 export function saveTerminalTranscript(id: string, transcript: TerminalTranscript): void {
   if (!/^[a-f0-9]{32}$/.test(id)) return;
   const file = join(directory(), `${id}.json`);

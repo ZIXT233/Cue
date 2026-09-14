@@ -24,7 +24,7 @@ export interface ProbeState {
 }
 
 // Event mapping follows Orca's Codex adapter (MIT, attribution in docs/harness).
-// TopCard schedules the interactive root TUI, not a roster of background agents.
+// Cue schedules the interactive root TUI, not a roster of background agents.
 export function hookState(event: HookSignal): HarnessState | undefined {
   const signal = normalizeHookSignal(event);
   if (signal.agentId) return undefined;

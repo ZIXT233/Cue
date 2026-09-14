@@ -13,12 +13,11 @@ export interface CueDesktop {
 
 declare global {
   interface Window {
-    topcardDesktop?: CueDesktop;
     cueDesktop?: CueDesktop;
     __CUE_API_BASE__?: string;
   }
 }
 
 export function desktopBridge(): CueDesktop | undefined {
-  return window.cueDesktop ?? window.topcardDesktop;
+  return window.cueDesktop;
 }

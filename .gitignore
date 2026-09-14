@@ -11,7 +11,7 @@ node_modules
 dist
 dist-ssr
 *.local
-/TopCard
+/Cue
 src-tauri/target
 .cue
 
@@ -25,3 +25,6 @@ src-tauri/target
 *.njsproj
 *.sln
 *.sw?
+
+# WorkBuddy workspace data
+.workbuddy

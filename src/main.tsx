@@ -3,7 +3,6 @@ import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { CardQueueShell } from "./components/CardQueueShell";
 import { DesktopChrome } from "./components/DesktopChrome";
 import { I18nProvider } from "./hooks/useI18n";
@@ -31,21 +30,17 @@ function installDesktopBridge() {
     openCard: (cardId) => openDetachedCardWindow(cardId),
     focus: () => window.focus(),
     openNotification: (url) => {
-      window.dispatchEvent(new CustomEvent("topcard:notification-click", { detail: { url } }));
+      window.dispatchEvent(new CustomEvent("cue:notification-click", { detail: { url } }));
     },
     requestNotifications: async () => {
       if (await isPermissionGranted()) return "granted";
       return requestPermission();
     },
     openNotificationSettings: async () => {
+      // The Rust command bypasses the opener plugin's frontend URL scope,
+      // which rejects system schemes like ms-settings:.
       try {
-        if (navigator.userAgent.includes("Mac")) {
-          await openUrl("x-apple.systempreferences:com.apple.Notifications-Settings.extension");
-        } else if (navigator.userAgent.includes("Win")) {
-          await openUrl("ms-settings:notifications");
-        } else {
-          return false;
-        }
+        await invoke("open_notification_settings");
         return true;
       } catch {
         return false;
@@ -53,8 +48,7 @@ function installDesktopBridge() {
     },
   };
   window.cueDesktop = desktop;
-  window.topcardDesktop = desktop;
-  document.documentElement.classList.add("topcard-desktop");
+  document.documentElement.classList.add("cue-desktop");
   document.documentElement.dataset.desktopPlatform = desktop.platform;
 }
 

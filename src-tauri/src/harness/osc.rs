@@ -15,7 +15,7 @@ impl HookOscProbe {
     pub fn push(&mut self, data: &str) -> Option<HookSignal> {
         self.pending.push_str(data);
         loop {
-            let Some(start) = self.pending.find("\x1b]777;topcard;") else {
+            let Some(start) = self.pending.find("\x1b]777;cue;") else {
                 self.pending = take_suffix(&self.pending, 14);
                 return None;
             };
@@ -67,6 +67,6 @@ mod tests {
         let _ = take_suffix(&text, 14);
         let mut probe = HookOscProbe::new("token".into());
         assert!(probe.push(&text).is_none());
-        assert!(probe.push(&format!("{text}\x1b]777;topcard;")).is_none());
+        assert!(probe.push(&format!("{text}\x1b]777;cue;")).is_none());
     }
 }

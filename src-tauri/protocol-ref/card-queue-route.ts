@@ -169,7 +169,7 @@ export async function POST(req: Request) {
           let workspace = state.workspaces?.find((item) => item.kind === body.kind && item.cwd === cwd && item.sshHost === body.sshHost);
           if (!workspace) {
             const id = randomUUID();
-            const runtimeCwd = body.kind === "local" ? cwd : resolve(process.env.TOPCARD_DATA_DIR || resolve(process.cwd(), ".topcard"), "ssh", id);
+            const runtimeCwd = body.kind === "local" ? cwd : resolve(process.env.CUE_DATA_DIR || resolve(process.cwd(), ".cue"), "ssh", id);
             if (body.kind === "ssh") {
               await mkdir(runtimeCwd, { recursive: true });
               await writeFile(resolve(runtimeCwd, "remote-workspace.json"), JSON.stringify({ sshHost: body.sshHost, cwd }), { mode: 0o600 });

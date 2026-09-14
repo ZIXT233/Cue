@@ -55,7 +55,7 @@ function shellEnvironment(): Record<string, string> {
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined) env[key] = value;
   }
-  // TopCard terminals are interactive PTYs. A parent launcher (including
+  // Cue terminals are interactive PTYs. A parent launcher (including
   // development tools) may set NO_COLOR for its own logs; do not leak that
   // opt-out into the user's terminal session.
   delete env.NO_COLOR;
@@ -95,10 +95,10 @@ export function createTerminal(cwd: string, cols: number, rows: number, id: stri
   } catch (error) {
     throw new Error(
       `Cannot load the node-pty native terminal module for ${process.platform}-${process.arch}. ` +
-      "The binary may be missing or incompatible. In the TopCard installation directory " +
+      "The binary may be missing or incompatible. In the Cue installation directory " +
       "(the npx cache directory when using npx), run: npm rebuild node-pty --build-from-source --ignore-scripts=false --foreground-scripts. " +
       "On Debian/Ubuntu, install build tools first: sudo apt-get install -y python3 build-essential. " +
-      `Then restart TopCard. Original error: ${error instanceof Error ? error.message : String(error)}`,
+      `Then restart Cue. Original error: ${error instanceof Error ? error.message : String(error)}`,
       { cause: error },
     );
   }

@@ -224,7 +224,7 @@ impl HarnessRuntime {
                 prefer_kitty_notifications(&mut env);
             }
             if let Some(session_id) = resume.as_ref().and_then(|s| s.provider_session_id.clone()) {
-                env.insert("TOPCARD_HARNESS_SESSION_ID".into(), session_id);
+                env.insert("CUE_HARNESS_SESSION_ID".into(), session_id);
             }
             let mut launch_args = command_prefix;
             if let Some(session_id) = resume.as_ref().and_then(|s| s.provider_session_id.as_deref()) {
@@ -237,7 +237,7 @@ impl HarnessRuntime {
                 let exports = env.iter().map(|(k, v)| format!("{k}={}", crate::ssh::shell_quote(v))).collect::<Vec<_>>().join(" ");
                 let command = std::iter::once(adapter.executable.to_string()).chain(launch_args).map(|s| crate::ssh::shell_quote(&s)).collect::<Vec<_>>().join(" ");
                 let remote = format!(
-                    "cd {} && {}{}TOPCARD_HARNESS_TTY=$(tty) && export TOPCARD_HARNESS_TTY && exec {}",
+                    "cd {} && {}{}CUE_HARNESS_TTY=$(tty) && export CUE_HARNESS_TTY && exec {}",
                     crate::ssh::shell_quote(&workspace.cwd),
                     if adapter.id == "cursor" { "unset GHOSTTY_RESOURCES_DIR && " } else { "" },
                     if exports.is_empty() { String::new() } else { format!("export {exports} && ") },
@@ -492,9 +492,16 @@ async fn detect_version(
         let out = ssh_login_exec(host, &cmd).await?;
         return Ok(String::from_utf8_lossy(&out).trim().to_string());
     }
-    let mut command = tokio::process::Command::new(command_path);
-    for arg in prefix { command.arg(arg); }
-    command.arg(flag);
+    let mut argv: Vec<String> = prefix.to_vec();
+    argv.push(flag.to_string());
+    let (program, args) = if cfg!(windows) {
+        let launch = windows_command(command_path, &argv);
+        (launch.executable, launch.args)
+    } else {
+        (command_path.to_string(), argv)
+    };
+    let mut command = tokio::process::Command::new(program);
+    command.args(args);
     command.current_dir(&workspace.cwd);
     for (key, value) in env { command.env(key, value); }
     let output = command.output().await.map_err(|e| AppError::msg(format!("启动检测失败：{e}")))?;

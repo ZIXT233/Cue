@@ -6,7 +6,8 @@ use crate::live::LiveBus;
 use crate::models::{CardQueue, RemoteHost};
 use crate::paths::{resolve_bin_dir, ssh_runtime_dir};
 use crate::queue::{
-    archive_card, defer_card, move_card, numeric_weight, now_ms, select_workspace_for_draft, sync_queue, QueueStore, TAB_LEASE_MS,
+    archive_card, move_card, numeric_weight, now_ms, park_remind, release_remind,
+    select_workspace_for_draft, sync_queue, QueueStore, TAB_LEASE_MS,
 };
 use crate::paste::{save_terminal_files, save_terminal_images, terminal_image_paste, validate_terminal_files, validate_terminal_images};
 use crate::settings::SettingsStore;
@@ -371,7 +372,25 @@ fn apply_action(queue: &mut CardQueue, body: &Value, action: &str, state: &AppSt
             let workspace = queue.workspaces.as_ref().and_then(|ws| ws.iter().find(|w| w.id == workspace_id)).cloned().ok_or_else(|| AppError::msg("请选择一个工作区"))?;
             select_workspace_for_draft(queue, &workspace);
         }
-        "defer" => defer_card(queue, id.unwrap_or_default()),
+        "remind_later" => {
+            let minutes = body.get("minutes").and_then(|v| v.as_i64()).unwrap_or(0);
+            if minutes <= 0 || minutes > 24 * 60 { return Err(AppError::msg("无效的提醒间隔")); }
+            let card = queue.cards.iter().find(|c| Some(c.id.as_str()) == id).ok_or_else(|| AppError::msg("卡片不存在"))?;
+            if card.session.is_none() && card.harness.is_none() { return Err(AppError::msg("空白卡片无需提醒")); }
+            if matches!(card.phase, crate::models::CardPhase::Working) { return Err(AppError::msg("卡片正在工作中")); }
+            if card.archived_at.is_some() { return Err(AppError::msg("卡片已归档")); }
+            let deadline = now_ms() + minutes * 60_000;
+            if !park_remind(queue, id.unwrap_or_default(), deadline) {
+                return Err(AppError::msg("卡片无法进入稍后提醒"));
+            }
+        }
+        "remind_back" => {
+            let card = queue.cards.iter().find(|c| Some(c.id.as_str()) == id).ok_or_else(|| AppError::msg("卡片已不存在"))?;
+            if matches!(card.phase, crate::models::CardPhase::Working) { return Err(AppError::msg("卡片正在工作中")); }
+            if !release_remind(queue, id.unwrap_or_default()) {
+                return Err(AppError::msg("该卡片不在稍后提醒中"));
+            }
+        }
         "front" | "back" => move_card(queue, id.unwrap_or_default(), action),
         "archive" => {
             if let Some(card) = queue.cards.iter().find(|c| Some(c.id.as_str()) == id) {

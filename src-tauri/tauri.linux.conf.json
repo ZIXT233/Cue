@@ -1,0 +1,19 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Cue",
+        "width": 1320,
+        "height": 860,
+        "minWidth": 880,
+        "minHeight": 620,
+        "hiddenTitle": true,
+        "titleBarStyle": "Overlay",
+        "trafficLightPosition": { "x": 24, "y": 25 },
+        "decorations": false
+      }
+    ]
+  }
+}

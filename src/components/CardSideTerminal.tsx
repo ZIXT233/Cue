@@ -238,9 +238,14 @@ function useCardSideTerminal({
   const extras = useCardExtraTerminals({ cardId, cwd, enabled, saved });
   const [open, setOpen] = useState(!!savedOpen);
   const lastSavedOpen = useRef(!!savedOpen);
+  // Echo guard: after a local toggle, our own persisted writes come back as
+  // savedOpen snapshots that can lag behind newer local toggles and resurrect
+  // a just-closed panel. Local state is the source of truth from then on.
+  const userToggled = useRef(false);
   useEffect(() => {
     if (lastSavedOpen.current === !!savedOpen) return;
     lastSavedOpen.current = !!savedOpen;
+    if (userToggled.current) return;
     setOpen(!!savedOpen);
   }, [savedOpen]);
   useEffect(() => {
@@ -264,6 +269,7 @@ function useCardSideTerminal({
   });
 
   const setPanelOpen = (next: boolean) => {
+    userToggled.current = true;
     setOpen(next);
     void persistCardSideTerminalOpen(cardId, next);
     if (next) extras.ensureTab();

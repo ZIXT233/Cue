@@ -1,5 +1,5 @@
 export function copyText(text: string): Promise<void> {
-  const desktop = typeof window === "undefined" ? undefined : (window as Window & { topcardDesktop?: { writeClipboardText?: (text: string) => Promise<boolean> } }).topcardDesktop;
+  const desktop = typeof window === "undefined" ? undefined : (window as Window & { cueDesktop?: { writeClipboardText?: (text: string) => Promise<boolean> } }).cueDesktop;
   if (desktop?.writeClipboardText && text.length <= 1024 * 1024) {
     return Promise.resolve(desktop.writeClipboardText(text)).then((ok) => {
       if (ok === false) throw new Error("Clipboard write failed");

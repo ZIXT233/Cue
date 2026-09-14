@@ -5,7 +5,7 @@ import { constants } from "node:fs";
 import { delimiter, join, isAbsolute } from "node:path";
 import { homedir } from "node:os";
 const exec = promisify(execFile);
-const START = "__TOPCARD_ENV_START__", END = "__TOPCARD_ENV_END__";
+const START = "__CUE_ENV_START__", END = "__CUE_ENV_END__";
 let cached: { key: string; expires: number; value: Promise<NodeJS.ProcessEnv> } | undefined;
 export function localEnvironment(force = false): Promise<NodeJS.ProcessEnv> {
   const shell = process.platform === "win32" ? "powershell.exe" : process.env.SHELL || "/bin/sh";

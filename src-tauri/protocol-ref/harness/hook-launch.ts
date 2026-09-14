@@ -26,10 +26,10 @@ export async function prepareHookLaunch(kind: HarnessId, directory: string, work
     if (!home.startsWith("/")) throw new Error("无法确定远程主机的 Home 目录");
     // Keep the Codex command stable across launches so hook trust is reusable;
     // changing the helper produces a new path and requires a fresh review.
-    root = kind === "grok" ? `${home}/.cache/topcard/harness-plugins/grok`
-      : kind === "codex" ? `${home}/.cache/topcard/harness-plugins/codex/${createHash("sha256").update(source).digest("hex").slice(0, 16)}`
-      : kind === "cursor" ? `${home}/.cache/topcard/harness-plugins/cursor`
-      : `${home}/.cache/topcard/harness/${token}`;
+    root = kind === "grok" ? `${home}/.cache/cue/harness-plugins/grok`
+      : kind === "codex" ? `${home}/.cache/cue/harness-plugins/codex/${createHash("sha256").update(source).digest("hex").slice(0, 16)}`
+      : kind === "cursor" ? `${home}/.cache/cue/harness-plugins/cursor`
+      : `${home}/.cache/cue/harness/${token}`;
     if (kind === "cursor") cursorConfigPath = `${home}/.cursor/hooks.json`;
     node = (await sshLoginExec(workspace.sshHost!, "command -v node")).toString().trim();
     if (!node.startsWith("/")) throw new Error("远程 Harness 状态探针需要 Node.js，请先在主机安装 Node.js");
@@ -40,7 +40,7 @@ export async function prepareHookLaunch(kind: HarnessId, directory: string, work
     ? `"${value.replaceAll('"', '\\"')}"` : shellQuote(value);
   const nodeCommand = [node, hookPath].map(quote).join(" ");
   // CLI hook runners may sanitize inherited Electron variables.
-  const electronNode = workspace.kind === "local" && (process.env.ELECTRON_RUN_AS_NODE === "1" || process.env.TOPCARD_NODE_RUN_AS_NODE === "1");
+  const electronNode = workspace.kind === "local" && (process.env.ELECTRON_RUN_AS_NODE === "1" || process.env.CUE_NODE_RUN_AS_NODE === "1");
   const legacyCommand = electronNode
     ? (process.platform === "win32" && kind !== "claude" ? `set "ELECTRON_RUN_AS_NODE=1" && ${nodeCommand}` : `ELECTRON_RUN_AS_NODE=1 ${nodeCommand}`)
     : nodeCommand;
@@ -57,7 +57,7 @@ export async function prepareHookLaunch(kind: HarnessId, directory: string, work
     if (windows) return windowsHookCommand(node, hookPath, electronNode, event);
     // Cursor TUI only dispatches prompt/stop/response from user/project hooks.
     // Bake the kind so IDE or other sessions still emit the required JSON.
-    return `${kind === "cursor" ? "TOPCARD_HARNESS_KIND=cursor " : ""}${legacyCommand}${event ? ` ${quote(event)}` : ""}`;
+    return `${kind === "cursor" ? "CUE_HARNESS_KIND=cursor " : ""}${legacyCommand}${event ? ` ${quote(event)}` : ""}`;
   };
   const command = commandFor();
   const files: Record<string, string> = { "hook.cjs": source };
@@ -75,7 +75,7 @@ export async function prepareHookLaunch(kind: HarnessId, directory: string, work
     const config = await inheritedConfig("gemini", workspace, node);
     const hooks = { ...(config.hooks as Record<string, unknown> ?? {}) };
     for (const event of ["SessionStart", "BeforeAgent", "AfterAgent", "BeforeTool", "AfterTool", "Notification"]) {
-      hooks[event] = [...(Array.isArray(hooks[event]) ? hooks[event] as unknown[] : []), { hooks: [{ type: "command", name: `topcard-${event}`, command, timeout: hookTimeout * 1000 }] }];
+      hooks[event] = [...(Array.isArray(hooks[event]) ? hooks[event] as unknown[] : []), { hooks: [{ type: "command", name: `cue-${event}`, command, timeout: hookTimeout * 1000 }] }];
     }
     files["system-defaults.json"] = JSON.stringify({ ...config, hooks });
     extraEnv.GEMINI_CLI_SYSTEM_DEFAULTS_PATH = workspace.kind === "ssh" ? `${root}/system-defaults.json` : join(root, "system-defaults.json");
@@ -86,11 +86,11 @@ export async function prepareHookLaunch(kind: HarnessId, directory: string, work
     extraEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify({ ...config, plugin: [...(Array.isArray(config.plugin) ? config.plugin : []), plugin] });
   } else if (kind === "grok") {
     const hooks = Object.fromEntries(["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop", "StopFailure", "StopCancelled", "Notification"].map(event => [event, [{ hooks: [{ type: "command", command, timeout: hookTimeout }] }]]));
-    files["grok-hooks.json"] = JSON.stringify({ topcardManaged: true, hooks });
+    files["grok-hooks.json"] = JSON.stringify({ cueManaged: true, hooks });
     if (workspace.kind === "ssh") {
       const configuredHome = (await sshExec(workspace.sshHost!, 'printf "%s" "${GROK_HOME:-$HOME/.grok}"')).toString().trim();
-      grokConfigPath = `${configuredHome}/hooks/topcard-session-state.json`;
-    } else grokConfigPath = join(process.env.GROK_HOME || join(homedir(), ".grok"), "hooks", "topcard-session-state.json");
+      grokConfigPath = `${configuredHome}/hooks/cue-session-state.json`;
+    } else grokConfigPath = join(process.env.GROK_HOME || join(homedir(), ".grok"), "hooks", "cue-session-state.json");
   } else if (kind === "pi" || kind === "omp") {
     files["pi-extension.mjs"] = await readFile(join(process.cwd(), "bin/harness-pi.mjs"), "utf8");
     args.push("--extension", workspace.kind === "ssh" ? `${root}/pi-extension.mjs` : join(root, "pi-extension.mjs"));
@@ -101,7 +101,7 @@ export async function prepareHookLaunch(kind: HarnessId, directory: string, work
     }
   } else {
     const cursor = kind === "cursor";
-    files[`${cursor ? ".cursor-plugin" : ".claude-plugin"}/plugin.json`] = JSON.stringify({ name: "topcard-session-state", version: "1.0.0", description: "Report this TopCard terminal's lifecycle" });
+    files[`${cursor ? ".cursor-plugin" : ".claude-plugin"}/plugin.json`] = JSON.stringify({ name: "cue-session-state", version: "1.0.0", description: "Report this Cue terminal's lifecycle" });
     const events = cursor
       ? [...CURSOR_HOOK_EVENTS]
       : ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "PostToolUseFailure", "Stop", "StopFailure"];
@@ -125,22 +125,22 @@ export async function prepareHookLaunch(kind: HarnessId, directory: string, work
     const installer = 'const fs=require("node:fs"),p=require("node:path"),root=process.argv[1];for(const [name,body] of Object.entries(JSON.parse(Buffer.from(process.argv[2],"base64")))){const f=p.join(root,name);fs.mkdirSync(p.dirname(f),{recursive:true,mode:448});const tmp=f+"."+require("node:crypto").randomUUID()+".tmp";fs.writeFileSync(tmp,body,{mode:384});fs.renameSync(tmp,f);}';
     await sshExec(workspace.sshHost!, [node, "-e", installer, root, payload].map(shellQuote).join(" "));
     if (grokConfigPath) {
-      const install = 'const fs=require("node:fs"),p=require("node:path"),src=process.argv[1],dest=process.argv[2];if(fs.existsSync(dest)&&JSON.parse(fs.readFileSync(dest,"utf8")).topcardManaged!==true)throw Error("Existing hook file is not owned by TopCard");fs.mkdirSync(p.dirname(dest),{recursive:true,mode:448});fs.copyFileSync(src,dest);fs.chmodSync(dest,384);';
+      const install = 'const fs=require("node:fs"),p=require("node:path"),src=process.argv[1],dest=process.argv[2];if(fs.existsSync(dest)&&JSON.parse(fs.readFileSync(dest,"utf8")).cueManaged!==true)throw Error("Existing hook file is not owned by Cue");fs.mkdirSync(p.dirname(dest),{recursive:true,mode:448});fs.copyFileSync(src,dest);fs.chmodSync(dest,384);';
       await sshExec(workspace.sshHost!, [node, "-e", install, `${root}/grok-hooks.json`, grokConfigPath].map(shellQuote).join(" "));
     }
     if (antigravityConfigPath) {
-      const installer = 'const fs=require("node:fs"),p=require("node:path"),dest=process.argv[1],src=process.argv[2];const x=fs.existsSync(dest)?JSON.parse(fs.readFileSync(dest,"utf8")):{};if(x["topcard-session-state"]&&!JSON.stringify(x["topcard-session-state"]).includes("/topcard/"))throw Error("Hook name already owned");x["topcard-session-state"]=JSON.parse(fs.readFileSync(src,"utf8"));fs.mkdirSync(p.dirname(dest),{recursive:true});fs.writeFileSync(dest+".topcard.tmp",JSON.stringify(x,null,2),{mode:384});fs.renameSync(dest+".topcard.tmp",dest);';
+      const installer = 'const fs=require("node:fs"),p=require("node:path"),dest=process.argv[1],src=process.argv[2];const x=fs.existsSync(dest)?JSON.parse(fs.readFileSync(dest,"utf8")):{};if(x["cue-session-state"]&&!JSON.stringify(x["cue-session-state"]).includes("/cue/"))throw Error("Hook name already owned");x["cue-session-state"]=JSON.parse(fs.readFileSync(src,"utf8"));fs.mkdirSync(p.dirname(dest),{recursive:true});fs.writeFileSync(dest+".cue.tmp",JSON.stringify(x,null,2),{mode:384});fs.renameSync(dest+".cue.tmp",dest);';
       await sshExec(workspace.sshHost!, [node, "-e", installer, antigravityConfigPath, `${root}/antigravity-hooks.json`].map(shellQuote).join(" "));
     }
     if (cursorConfigPath) {
-      const installer = 'const fs=require("node:fs"),p=require("node:path"),dest=process.argv[1],src=process.argv[2],hook=process.argv[3];const owned=c=>{if(typeof c!=="string")return false;if(c.includes(hook))return true;const m=c.match(/-EncodedCommand\\s+(\\S+)/);if(m){try{const s=Buffer.from(m[1],"base64").toString("utf16le");if(s.includes(hook)||/[\\\\/](?:harness-plugins[\\\\/]cursor|\\.cache[\\\\/]topcard[\\\\/]harness)[\\\\/].*hook\\.cjs/.test(s))return true;}catch{}}return /[\\\\/](?:harness-plugins[\\\\/]cursor|\\.cache[\\\\/]topcard[\\\\/]harness)[\\\\/].*hook\\.cjs/.test(c)};const incoming=JSON.parse(fs.readFileSync(src,"utf8"));let x=fs.existsSync(dest)?JSON.parse(fs.readFileSync(dest,"utf8")):{};if(!x||Array.isArray(x)||typeof x!=="object")throw Error("Invalid Cursor hooks configuration");const hooks={...(x.hooks&&typeof x.hooks==="object"&&!Array.isArray(x.hooks)?x.hooks:{})};for(const [event,entries] of Object.entries(incoming.hooks||{})){const cur=Array.isArray(hooks[event])?hooks[event]:[];hooks[event]=[...cur.filter(e=>!owned(e&&e.command)),...entries];}x={...x,version:1,hooks};fs.mkdirSync(p.dirname(dest),{recursive:true,mode:448});fs.writeFileSync(dest+".topcard.tmp",JSON.stringify(x,null,2),{mode:384});fs.renameSync(dest+".topcard.tmp",dest);';
+      const installer = 'const fs=require("node:fs"),p=require("node:path"),dest=process.argv[1],src=process.argv[2],hook=process.argv[3];const owned=c=>{if(typeof c!=="string")return false;if(c.includes(hook))return true;const m=c.match(/-EncodedCommand\\s+(\\S+)/);if(m){try{const s=Buffer.from(m[1],"base64").toString("utf16le");if(s.includes(hook)||/[\\\\/](?:harness-plugins[\\\\/]cursor|\\.cache[\\\\/]cue[\\\\/]harness)[\\\\/].*hook\\.cjs/.test(s))return true;}catch{}}return /[\\\\/](?:harness-plugins[\\\\/]cursor|\\.cache[\\\\/]cue[\\\\/]harness)[\\\\/].*hook\\.cjs/.test(c)};const incoming=JSON.parse(fs.readFileSync(src,"utf8"));let x=fs.existsSync(dest)?JSON.parse(fs.readFileSync(dest,"utf8")):{};if(!x||Array.isArray(x)||typeof x!=="object")throw Error("Invalid Cursor hooks configuration");const hooks={...(x.hooks&&typeof x.hooks==="object"&&!Array.isArray(x.hooks)?x.hooks:{})};for(const [event,entries] of Object.entries(incoming.hooks||{})){const cur=Array.isArray(hooks[event])?hooks[event]:[];hooks[event]=[...cur.filter(e=>!owned(e&&e.command)),...entries];}x={...x,version:1,hooks};fs.mkdirSync(p.dirname(dest),{recursive:true,mode:448});fs.writeFileSync(dest+".cue.tmp",JSON.stringify(x,null,2),{mode:384});fs.renameSync(dest+".cue.tmp",dest);';
       await sshExec(workspace.sshHost!, [node, "-e", installer, cursorConfigPath, `${root}/cursor-user-hooks.json`, hookPath].map(shellQuote).join(" "));
     }
     return { args, env: {
       ...extraEnv,
-      TOPCARD_HARNESS_CHANNEL: token,
-      TOPCARD_HARNESS_KIND: kind,
-      ...(kind === "cursor" ? { TOPCARD_HARNESS_SIGNAL_DIR: `${root}/cards/${token}` } : {}),
+      CUE_HARNESS_CHANNEL: token,
+      CUE_HARNESS_KIND: kind,
+      ...(kind === "cursor" ? { CUE_HARNESS_SIGNAL_DIR: `${root}/cards/${token}` } : {}),
     } };
   }
   for (const [name, body] of Object.entries(files)) {
@@ -154,7 +154,7 @@ export async function prepareHookLaunch(kind: HarnessId, directory: string, work
     try { config = JSON.parse(await readFile(antigravityConfigPath, "utf8")); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     if (!config || Array.isArray(config) || typeof config !== "object") throw new Error("Invalid Antigravity hooks configuration");
-    const existing = config["topcard-session-state"];
+    const existing = config["cue-session-state"];
     const owned = (value: unknown): boolean => {
       if (!value || typeof value !== "object" || Array.isArray(value)) return false;
       const definitions = Object.entries(value).filter(([key]) => key !== "enabled");
@@ -163,11 +163,11 @@ export async function prepareHookLaunch(kind: HarnessId, directory: string, work
         && Array.isArray(entries) && entries.length > 0 && entries.every(entry => {
           const handlers = Array.isArray(entry?.hooks) ? entry.hooks : [entry];
           return handlers.length > 0 && handlers.every((handler: { command?: string }) =>
-            typeof handler.command === "string" && (handler.command === commandFor(event) || /[\\/]\.topcard[\\/]harness-plugins[\\/]antigravity[\\/]hook\.cjs["']/.test(handler.command)));
+            typeof handler.command === "string" && (handler.command === commandFor(event) || /[\\/]\.cue[\\/]harness-plugins[\\/]antigravity[\\/]hook\.cjs["']/.test(handler.command)));
         }));
     };
-    if (existing && !owned(existing)) throw new Error("Antigravity hook 同名条目不属于 TopCard，未覆盖");
-    config["topcard-session-state"] = JSON.parse(files["antigravity-hooks.json"]);
+    if (existing && !owned(existing)) throw new Error("Antigravity hook 同名条目不属于 Cue，未覆盖");
+    config["cue-session-state"] = JSON.parse(files["antigravity-hooks.json"]);
     await mkdir(join(antigravityConfigPath, ".."), { recursive: true, mode: 0o700 });
     await writeFile(`${antigravityConfigPath}.${token}.tmp`, JSON.stringify(config, null, 2), { mode: 0o600 });
     await rename(`${antigravityConfigPath}.${token}.tmp`, antigravityConfigPath);
@@ -175,7 +175,7 @@ export async function prepareHookLaunch(kind: HarnessId, directory: string, work
   if (grokConfigPath) {
     try {
       const existing = JSON.parse(await readFile(grokConfigPath, "utf8"));
-      if (existing.topcardManaged !== true) throw new Error("Grok hook 同名文件不属于 TopCard，未覆盖");
+      if (existing.cueManaged !== true) throw new Error("Grok hook 同名文件不属于 Cue，未覆盖");
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     await mkdir(join(grokConfigPath, ".."), { recursive: true, mode: 0o700 });
     await writeFile(`${grokConfigPath}.${token}.tmp`, files["grok-hooks.json"], { mode: 0o600 });
@@ -190,23 +190,23 @@ export async function prepareHookLaunch(kind: HarnessId, directory: string, work
     await writeFile(`${cursorConfigPath}.${token}.tmp`, JSON.stringify(merged, null, 2), { mode: 0o600 });
     await rename(`${cursorConfigPath}.${token}.tmp`, cursorConfigPath);
   }
-  return { args, env: { ...extraEnv, TOPCARD_HARNESS_SIGNAL_DIR: directory, TOPCARD_HARNESS_KIND: kind } };
+  return { args, env: { ...extraEnv, CUE_HARNESS_SIGNAL_DIR: directory, CUE_HARNESS_KIND: kind } };
 }
 
 export function cursorUserHooksPath(home = homedir()): string {
-  return process.env.TOPCARD_CURSOR_HOOKS || join(home, ".cursor", "hooks.json");
+  return process.env.CUE_CURSOR_HOOKS || join(home, ".cursor", "hooks.json");
 }
 
-const TOPCARD_CURSOR_HOOK = /[\\/](?:harness-plugins[\\/]cursor|\.cache[\\/]topcard[\\/]harness)[\\/].*hook\.cjs/;
+const CUE_CURSOR_HOOK = /[\\/](?:harness-plugins[\\/]cursor|\.cache[\\/]cue[\\/]harness)[\\/].*hook\.cjs/;
 
-export function isTopCardCursorCommand(command: string, hookPath: string): boolean {
+export function isCueCursorCommand(command: string, hookPath: string): boolean {
   if (typeof command !== "string") return false;
-  if (command.includes(hookPath) || TOPCARD_CURSOR_HOOK.test(command)) return true;
+  if (command.includes(hookPath) || CUE_CURSOR_HOOK.test(command)) return true;
   const encoded = command.match(/-EncodedCommand\s+(\S+)/)?.[1];
   if (!encoded) return false;
   try {
     const script = Buffer.from(encoded, "base64").toString("utf16le");
-    return script.includes(hookPath) || TOPCARD_CURSOR_HOOK.test(script);
+    return script.includes(hookPath) || CUE_CURSOR_HOOK.test(script);
   } catch { return false; }
 }
 
@@ -217,7 +217,7 @@ export function mergeCursorUserHooks(existing: unknown, incoming: { hooks?: Reco
     ? { ...(current.hooks as Record<string, unknown>) } : {};
   for (const [event, entries] of Object.entries(incoming.hooks ?? {})) {
     const previous = Array.isArray(hooks[event]) ? hooks[event] as { command?: string }[] : [];
-    hooks[event] = [...previous.filter(entry => !isTopCardCursorCommand(entry?.command ?? "", hookPath)), ...(Array.isArray(entries) ? entries : [])];
+    hooks[event] = [...previous.filter(entry => !isCueCursorCommand(entry?.command ?? "", hookPath)), ...(Array.isArray(entries) ? entries : [])];
   }
   return { ...current, version: 1, hooks };
 }
@@ -225,7 +225,7 @@ export function mergeCursorUserHooks(existing: unknown, incoming: { hooks?: Reco
 export function windowsHookCommand(node: string, hook: string, electronNode: boolean, event?: string, extraEnv: Record<string, string> = {}): string {
   const literal = (value: string) => `'${value.replaceAll("'", "''")}'`;
   const invoke = [node, hook, ...(event ? [event] : [])].map(literal).join(" ");
-  const cursorReply = extraEnv.TOPCARD_HARNESS_KIND === "cursor" ? cursorHookStdout(event) : undefined;
+  const cursorReply = extraEnv.CUE_HARNESS_KIND === "cursor" ? cursorHookStdout(event) : undefined;
   // This outer command works in cmd, PowerShell and Git Bash. Keep all paths
   // and optional event arguments inside the encoded script, not shell syntax.
   // Read piped JSON explicitly; native stdin is not forwarded by PowerShell.

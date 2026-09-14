@@ -9,9 +9,9 @@ export default defineConfig(() => ({
   plugins: [react()],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
-      "next/navigation": path.resolve(__dirname, "./src/shims/next-navigation.ts"),
-      "next/link": path.resolve(__dirname, "./src/shims/next-link.tsx"),
+      "@": path.resolve(import.meta.dirname, "./src"),
+      "next/navigation": path.resolve(import.meta.dirname, "./src/shims/next-navigation.ts"),
+      "next/link": path.resolve(import.meta.dirname, "./src/shims/next-link.tsx"),
     },
   },
   clearScreen: false,
@@ -27,7 +27,7 @@ export default defineConfig(() => ({
         }
       : undefined,
     watch: {
-      ignored: ["**/src-tauri/**", "**/TopCard/**"],
+      ignored: ["**/src-tauri/**"],
     },
   },
 }));

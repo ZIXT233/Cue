@@ -35,6 +35,11 @@ export function DetachedCardTools({ children, cardId, cwd, remote, saved, savedO
   const extras = useCardExtraTerminals({ cardId, cwd, enabled: !remote, saved });
   const lastRightPanel = useRef<"terminal" | "tools">(savedOpen ? "terminal" : "terminal");
   const lastSavedOpen = useRef(!!savedOpen);
+  // Echo guard: once the user toggles locally, our own persisted writes come
+  // back as savedOpen snapshots that can lag behind newer local toggles and
+  // resurrect a just-closed panel. After the first local interaction, local
+  // state is the source of truth; only the initial late restore still applies.
+  const userToggled = useRef(false);
   const rightWidth = useRef(RIGHT_PANEL_FALLBACK_WIDTH);
   const rightMax = useCallback(() => RIGHT_PANEL_MAX_WIDTH, []);
   const rightResize = useResizablePanel({
@@ -52,6 +57,7 @@ export function DetachedCardTools({ children, cardId, cwd, remote, saved, savedO
   useEffect(() => {
     if (lastSavedOpen.current === !!savedOpen) return;
     lastSavedOpen.current = !!savedOpen;
+    if (userToggled.current) return;
     setRightPanel((current) => {
       if (savedOpen) return "terminal";
       return current === "terminal" ? null : current;
@@ -61,6 +67,7 @@ export function DetachedCardTools({ children, cardId, cwd, remote, saved, savedO
     if (rightPanel === "terminal" && !remote) extras.ensureTab();
   }, [extras.ensureTab, remote, rightPanel]);
   const setTerminalOpen = (open: boolean) => {
+    userToggled.current = true;
     setRightPanel(open ? "terminal" : null);
     void persistCardSideTerminalOpen(cardId, open);
     if (open && !remote) extras.ensureTab();
@@ -69,6 +76,7 @@ export function DetachedCardTools({ children, cardId, cwd, remote, saved, savedO
     setTerminalOpen(rightPanel !== "terminal");
   };
   const toggleTools = () => {
+    userToggled.current = true;
     setRightPanel((current) => {
       const next = current === "tools" ? null : "tools";
       if (current === "terminal" || next === "tools") void persistCardSideTerminalOpen(cardId, false);
@@ -76,6 +84,7 @@ export function DetachedCardTools({ children, cardId, cwd, remote, saved, savedO
     });
   };
   const rightToggle = <button className="cq-panel-toggle" title={t("queue.toggleRightSidebar")} aria-label={t("queue.toggleRightSidebar")} aria-controls="detached-tools" aria-expanded={!!rightPanel} aria-pressed={!!rightPanel} onClick={() => {
+    userToggled.current = true;
     setRightPanel((current) => {
       const next = current ? null : lastRightPanel.current;
       void persistCardSideTerminalOpen(cardId, next === "terminal");

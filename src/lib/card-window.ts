@@ -29,6 +29,8 @@ export async function openDetachedCardWindow(cardId: string): Promise<boolean> {
     hiddenTitle: true,
     titleBarStyle: "overlay",
     trafficLightPosition: new LogicalPosition(24, 25),
+    // Windows/Linux drop the native frame too; in-app controls render via DesktopChrome.
+    ...(desktopBridge()?.platform !== "darwin" ? { decorations: false } : {}),
     backgroundThrottling: "disabled" as BackgroundThrottlingPolicy,
     focus: true,
   });

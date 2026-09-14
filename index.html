@@ -9,8 +9,8 @@
       (function () {
         var t = "auto";
         try {
-          var s = (window.topcardDesktop && window.topcardDesktop.storage
-            ? window.topcardDesktop.storage
+          var s = (window.cueDesktop && window.cueDesktop.storage
+            ? window.cueDesktop.storage
             : localStorage
           ).getItem("pi-theme");
           if (["light", "dark", "auto"].includes(s)) t = s;
@@ -20,7 +20,7 @@
         r.dataset.theme = t;
         r.classList.toggle("dark", t === "dark");
         if (window.__TAURI_INTERNALS__) {
-          r.classList.add("topcard-desktop");
+          r.classList.add("cue-desktop");
           r.dataset.desktopPlatform = /Mac/i.test(navigator.userAgent)
             ? "darwin"
             : /Win/i.test(navigator.userAgent)

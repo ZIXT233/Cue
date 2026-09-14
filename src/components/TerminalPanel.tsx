@@ -24,6 +24,8 @@ interface Props {
   themeProfile?: TerminalThemeProfile;
   remote?: boolean;
   readOnly?: boolean;
+  /** Hide the xterm caret while ConPTY scrapes CUP cell-by-cell (Windows). */
+  conptyCursorHide?: boolean;
   tab: TerminalTab;
   active: boolean;
   /** Reply to CSI ?1004h. I while the card is in the queue, O otherwise. */
@@ -40,7 +42,7 @@ function liveThemeProfile(themeProfile: TerminalThemeProfile | undefined, remote
   return resolveTerminalThemeProfile(themeProfile, terminalThemeHostFromDocument(remote, document.documentElement, navigator));
 }
 
-export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, onUnavailable, embedded = false, readOnly = false, onStatusChange, onOutput, themeProfile, remote = false, focusReporting = false, inQueue = false }: Props) {
+export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, onUnavailable, embedded = false, readOnly = false, onStatusChange, onOutput, themeProfile, remote = false, focusReporting = false, inQueue = false, conptyCursorHide = true }: Props) {
   const { t } = useI18n();
   const { id, cwd, restored } = tab;
   const containerRef = useRef<HTMLDivElement>(null);
@@ -54,6 +56,8 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
   const inQueueRef = useRef(inQueue);
   focusReportingRef.current = focusReporting;
   inQueueRef.current = inQueue;
+  const conptyCursorHideRef = useRef(conptyCursorHide);
+  conptyCursorHideRef.current = conptyCursorHide;
   const sendFocusReport = useCallback((inQueueNow: boolean) => {
     if (!focusReportingRef.current || !focusArmedRef.current) return;
     writerRef.current?.write(inQueueNow ? "\x1b[I" : "\x1b[O");
@@ -111,12 +115,21 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
     let conptyCursorHidden = false;
     let conptyRevealTimer: ReturnType<typeof setTimeout> | undefined;
     const liveTheme = () => harnessTerminalTheme(document.documentElement.classList.contains("dark"), liveThemeProfile(themeProfile, remote));
+    // Follow the settings font slider 1:1 (chat baseline 14px ↔ terminal 13px),
+    // so one control scales both surfaces.
+    const liveFontSize = () => {
+      const chat = Number.parseFloat(getComputedStyle(container).getPropertyValue("--chat-content-font-size"));
+      const offset = Number.isFinite(chat) ? chat - 14 : 0;
+      return Math.max(9, Math.min(22, Math.round(13 + offset)));
+    };
     const terminal = new Terminal({
       cursorBlink: !conptyHost,
       allowProposedApi: true,
       fontFamily: getComputedStyle(container).getPropertyValue("--font-mono").trim() || "monospace",
-      fontSize: 13,
-      lineHeight: 1.25,
+      fontSize: liveFontSize(),
+      // Must stay 1.0: any extra leading shows background seams between rows of
+      // block-glyph TUI art (Claude Code logo) in the Windows DOM renderer.
+      lineHeight: 1,
       scrollback: 8000,
       // xterm 6.0.0 + screenReaderMode re-sends the trailing character when an
       // IME commits in the middle of a line (xtermjs/xterm.js#5456 / PR #5698).
@@ -128,14 +141,21 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
     });
     const themeObserver = new MutationObserver(() => {
       terminal.options.theme = liveTheme();
+      const size = liveFontSize();
+      if (size !== terminal.options.fontSize) {
+        terminal.options.fontSize = size;
+        fit.fit();
+      }
     });
-    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme", "data-desktop-platform"] });
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme", "data-desktop-platform", "style"] });
     terminalRef.current = terminal;
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(container);
     const hideConptyCursor = () => {
-      if (!conptyHost) return;
+      if (!conptyHost || !conptyCursorHideRef.current) return;
+      // Reveal only after output goes quiet. A short window strobes the cursor
+      // while streaming TUIs (Codex spinner) emit chunks faster than the timer.
       clearTimeout(conptyRevealTimer);
       if (!conptyCursorHidden) {
         conptyCursorHidden = true;
@@ -144,7 +164,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       conptyRevealTimer = setTimeout(() => {
         conptyCursorHidden = false;
         if (!disposed) container.classList.remove("is-conpty-redraw");
-      }, 40);
+      }, 250);
     };
     // Let native horizontal gestures reach the card deck without xterm turning
     // them into terminal input or cancelling them. Vertical terminal scrolling
@@ -291,6 +311,11 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
     let sseMessages = 0;
     let bytesWritten = 0;
     let skipped = 0;
+    let gaps = 0;
+    let lastReset = false;
+    let resyncing = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let reconnectAttempt = 0;
     const publishProbe = (statusName: string) => {
       if (!developerProbesEnabled()) return;
       setXtermProbe(id, {
@@ -299,9 +324,40 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
         sseMessages,
         bytesWritten,
         lastOffset: offset,
-        lastReset: false,
-        status: `${statusName}${skipped ? ` skip=${skipped}` : ""}`,
+        lastReset,
+        gaps,
+        status: `${statusName}${skipped ? ` skip=${skipped}` : ""}${gaps ? ` gaps=${gaps}` : ""}`,
       });
+    };
+    // Native EventSource retry would reuse the URL captured at connect time,
+    // including a stale `after` cursor. Always rebuild the request with the
+    // offset we actually hold so the server replays exactly what we missed.
+    const scheduleReconnect = () => {
+      if (disposed || exited) return;
+      events?.close();
+      events = null;
+      clearTimeout(reconnectTimer);
+      const delay = Math.min(15_000, 500 * 2 ** reconnectAttempt);
+      reconnectAttempt += 1;
+      reconnectTimer = setTimeout(connect, delay);
+    };
+    const enqueueOutput = (event: Extract<TerminalEvent, { type: "output" }>) => {
+      hideConptyCursor();
+      if (focusReportingRef.current && event.data.includes("\x1b[?1004h")) {
+        focusArmedRef.current = true;
+        sendFocusReport(inQueueRef.current);
+      }
+      if (event.data.includes("\x1b[?1004l")) focusArmedRef.current = false;
+      bytesWritten += event.data.length;
+      outputQueue = outputQueue.then(() => new Promise<void>((resolve) => {
+        if (disposed) { resolve(); return; }
+        replaying = event.reset === true;
+        if (event.reset) terminal.reset();
+        terminal.write(event.data, resolve);
+      }));
+      callbacksRef.current.onOutput?.(event.data);
+      offset = event.offset;
+      publishProbe("ready");
     };
     const connect = () => {
       if (disposed || exited || !navigator.onLine) return;
@@ -311,31 +367,38 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
         const event = JSON.parse(message.data) as TerminalEvent;
         sseMessages += 1;
         if (event.type === "output") {
-          if (!event.reset && offset !== undefined && event.offset <= offset) {
+          reconnectAttempt = 0;
+          if (event.reset) {
+            // Full replay: the server trimmed past our cursor (or this is the
+            // first attach). Wipe and redraw instead of splicing.
+            lastReset = true;
+            resyncing = false;
+            enqueueOutput(event);
+            return;
+          }
+          const from = event.from ?? offset ?? event.offset;
+          if (offset !== undefined && event.offset <= offset) {
             skipped += 1;
             publishProbe("ready");
             return;
           }
-          hideConptyCursor();
-          if (focusReportingRef.current && event.data.includes("\x1b[?1004h")) {
-            focusArmedRef.current = true;
-            sendFocusReport(inQueueRef.current);
+          if (offset !== undefined && from !== offset) {
+            // Byte gap (dropped SSE consumer) or partial overlap: never render
+            // the hole — reconnect so the server replays the missing range.
+            gaps += 1;
+            if (!resyncing) {
+              resyncing = true;
+              publishProbe("resync");
+              scheduleReconnect();
+            }
+            return;
           }
-          if (event.data.includes("\x1b[?1004l")) focusArmedRef.current = false;
-          bytesWritten += event.data.length;
-          outputQueue = outputQueue.then(() => new Promise<void>((resolve) => {
-            if (disposed) { resolve(); return; }
-            replaying = event.reset === true;
-            if (event.reset) terminal.reset();
-            terminal.write(event.data, resolve);
-          }));
-          callbacksRef.current.onOutput?.(event.data);
-          offset = event.offset;
-          publishProbe("ready");
+          enqueueOutput(event);
         } else {
           exited = true;
           connected = false;
           terminal.options.disableStdin = true;
+          clearTimeout(reconnectTimer);
           events?.close();
           setExitCode(event.type === "exit" ? event.exitCode : null);
           setStatus("exited");
@@ -343,6 +406,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       };
       events.onopen = () => {
         connected = true;
+        resyncing = false;
         if (inputFailed) return;
         terminal.options.disableStdin = sessionReadOnly;
         setStatus("ready");
@@ -355,7 +419,8 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
         if (disposed || exited) return;
         connected = false;
         terminal.options.disableStdin = true;
-        setStatus(events?.readyState === EventSource.CLOSED ? "error" : "connecting");
+        setStatus("connecting");
+        scheduleReconnect();
       };
     };
 
@@ -386,10 +451,17 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
     const pageHide = () => {
       connected = false;
       terminal.options.disableStdin = true;
+      clearTimeout(reconnectTimer);
       events?.close();
       if (!exited && !inputFailed) setStatus("connecting");
     };
-    const pageShow = (event: PageTransitionEvent) => { if (event.persisted) connect(); };
+    const pageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        reconnectAttempt = 0;
+        resyncing = false;
+        connect();
+      }
+    };
     window.addEventListener("pagehide", pageHide);
     window.addEventListener("pageshow", pageShow);
     window.addEventListener("offline", pageHide);
@@ -398,6 +470,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       disposed = true;
       if (focusReportingRef.current && focusArmedRef.current && !inQueueRef.current) writer.write("\x1b[O");
       clearTimeout(conptyRevealTimer);
+      clearTimeout(reconnectTimer);
       if (inputRaf) cancelAnimationFrame(inputRaf);
       if (pendingInput) writer.write(pendingInput);
       pendingInput = "";

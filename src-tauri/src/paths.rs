@@ -1,14 +1,14 @@
 use std::path::{Path, PathBuf};
 
 pub fn data_dir() -> PathBuf {
-    if let Ok(path) = std::env::var("CUE_DATA_DIR").or_else(|_| std::env::var("TOPCARD_DATA_DIR")) {
+    if let Ok(path) = std::env::var("CUE_DATA_DIR") {
         return PathBuf::from(path);
     }
     dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".cue")
 }
 
 pub fn queue_file() -> PathBuf {
-    if let Ok(path) = std::env::var("CUE_QUEUE_FILE").or_else(|_| std::env::var("TOPCARD_QUEUE_FILE")) {
+    if let Ok(path) = std::env::var("CUE_QUEUE_FILE") {
         return PathBuf::from(path);
     }
     data_dir().join("queue.json")

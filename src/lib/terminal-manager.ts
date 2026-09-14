@@ -1,5 +1,5 @@
 export type TerminalEvent =
-  | { type: "output"; data: string; offset: number; reset?: boolean }
+  | { type: "output"; data: string; from?: number; offset: number; reset?: boolean }
   | { type: "exit"; exitCode: number }
   | { type: "closed" };
 

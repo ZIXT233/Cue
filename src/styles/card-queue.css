@@ -46,7 +46,7 @@ html.dark .cq-shell { --cq-paper: #252824; --cq-surface: #1c201d; --cq-ink: #e7e
 .cq-detached-list button { display: flex; align-items: center; gap: 7px; color: var(--cq-muted); background: transparent; border: 0; text-align: left; font-size: 11px; }
 .cq-detached-list button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .cq-main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 32px 58px 18px; max-width: 1400px; margin: 0 auto; width: 100%; }
-.cq-stage-heading { display: flex; justify-content: space-between; align-items: flex-end; margin: 0 auto 25px; width: 100%; max-width: 880px; flex-shrink: 0; }
+.cq-stage-heading { display: flex; justify-content: space-between; align-items: flex-end; margin: 0 auto 25px; width: 100%; max-width: 1056px; flex-shrink: 0; }
 .cq-stage-heading h1 { font-size: 23px; font-weight: 450; letter-spacing: -.6px; margin: 9px 0 0; }
 .cq-count { color: var(--cq-muted); font-size: 10px; display: flex; align-items: baseline; gap: 7px; white-space: nowrap; padding-bottom: 3px; }
 .cq-count b { color: var(--cq-ink); font: 14px ui-monospace, monospace; }
@@ -138,8 +138,8 @@ html.dark .cq-chat { --user-bg: #2d332b; --tool-bg: #242b24; --bg-hover: #363e32
 .cq-sidebar-brand > button { display: grid; place-items: center; border: 0; background: transparent; color: var(--cq-muted); padding: 5px; }
 .cq-add-workspace { display: flex; align-items: center; gap: 8px; margin: 13px 3px 0; padding: 6px 8px; border: 0; background: transparent; color: #747e6d; font-size: 11px; text-align: left; }
 .cq-add-workspace > span:last-child { margin-left: auto; }
-.cq-main { padding: 24px 48px 18px; max-width: 1380px; }
-.cq-stage { max-width: 900px; }
+.cq-main { padding: 24px 48px 18px; max-width: 1656px; }
+.cq-stage { max-width: none; }
 .cq-large-card { border: 1px solid #e5e7e1; border-radius: 22px; background: #fff; box-shadow: 0 1px 2px #29332606, 0 10px 30px -8px #26312419, 0 30px 60px -25px #26312418; transform-origin: center; transition: transform .42s cubic-bezier(.2,.65,.25,1); }
 .cq-back-card { border: 1px solid #e2e5dd; border-radius: 22px; background: #fff; box-shadow: 0 6px 14px -5px #34432c22, 0 18px 30px -18px #34432c24; }
 .cq-large-card.is-leaving { transform: translateY(calc(-100% - 30px)); opacity: 1; }
@@ -201,7 +201,7 @@ html.dark .cq-chat { --user-bg: #2d332b; --tool-bg: #242b24; --bg-hover: #363e32
 
 .cq-main{padding-bottom:8px}
 .cq-large-card [data-conversation-scroll],.cq-large-card textarea{overscroll-behavior-y:contain}
-.cq-insertion-position{display:inline-flex;align-items:center;gap:5px;flex-shrink:0;border:0;background:transparent;color:var(--cq-ink);font:inherit;line-height:16px;padding:0;cursor:pointer}
+.cq-insertion-position{display:inline-flex;align-items:center;gap:5px;flex-shrink:0;white-space:nowrap;border:0;background:transparent;color:var(--cq-ink);font:inherit;line-height:16px;padding:0;cursor:pointer}
 .cq-insertion-position:hover{color:var(--cq-accent)}
 .cq-insertion-position:focus-visible{outline:2px solid var(--cq-accent);outline-offset:3px;border-radius:3px}
 .cq-insertion-position:disabled{opacity:.5;cursor:wait}
@@ -295,7 +295,7 @@ html.dark .cq-chat { --user-bg: #2d332b; --tool-bg: #242b24; --bg-hover: #363e32
 .cq-queue-toast>span{min-width:0}
 .cq-queue-toast button{flex-shrink:0;border:0;border-radius:6px;padding:2px 6px;background:transparent;color:var(--cq-muted);font-size:18px;line-height:1;cursor:pointer}
 @keyframes cq-queue-toast-in{from{opacity:0;transform:translateX(-50%) translateY(-6px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
-.cq-card-search{position:absolute;top:15px;left:50%;z-index:45;width:min(460px,calc(100% - 360px));transform:translateX(-50%)}
+.cq-card-search{position:absolute;top:15px;left:50%;z-index:45;width:var(--cq-search-width,min(460px,calc(100% - 360px)));transform:translateX(-50%)}
 .cq-card-search-field{display:flex;height:34px;align-items:center;gap:8px;padding:0 13px;border:1px solid #d8ddd5;border-radius:999px;background:#fafbf9;color:var(--cq-muted);transition:background 160ms ease,border-color 160ms ease,box-shadow 160ms ease}
 .cq-card-search-field:focus-within{border-color:#bcc4ba;background:#fff;box-shadow:0 6px 18px #26312416}
 .cq-card-search-field>svg{flex:0 0 auto;width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round}
@@ -310,7 +310,16 @@ html.dark .cq-chat { --user-bg: #2d332b; --tool-bg: #242b24; --bg-hover: #363e32
 .cq-card-search-meta>span{display:flex;min-width:0;max-width:50%;align-items:center;gap:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cq-card-search-meta svg{flex:0 0 auto}
 .cq-card-search-empty{padding:20px 12px;color:var(--cq-muted);font-size:12px;text-align:center}
-@media(max-width:900px){.cq-content-toolbar .cq-insertion-position{width:32px;min-width:32px;max-width:32px;padding-inline:0;justify-content:center;gap:0}.cq-sort-label,.cq-mode-label{display:none}}
+/* Toolbar labels vs centered search box: collapse is decided in JS
+   (CardQueueShell measures the toolbar's real expanded width against the
+   search box and toggles .is-compact, optionally reserving a narrower search
+   width via the --cq-search-width custom property). */
+.cq-content-toolbar.is-compact .cq-insertion-position{width:32px;min-width:32px;max-width:32px;padding-inline:0;justify-content:center;gap:0}
+.cq-content-toolbar.is-compact .cq-sort-label,.cq-content-toolbar.is-compact .cq-mode-label{display:none}
+/* Measurement-only state: force the expanded layout so offsetWidth includes
+   the labels. Must stay AFTER .is-compact to win the cascade while measuring. */
+.cq-content-toolbar.cq-toolbar-expanded .cq-insertion-position{width:auto;min-width:0;max-width:none;padding-inline:10px;justify-content:flex-start;gap:5px}
+.cq-content-toolbar.cq-toolbar-expanded .cq-sort-label,.cq-content-toolbar.cq-toolbar-expanded .cq-mode-label{display:inline}
 @media(max-width:700px){.cq-content-toolbar{left:14px;gap:4px}.cq-toolbar-trigger{width:30px}.cq-card-search{top:15px;right:14px;left:auto;width:calc(100% - 178px);transform:none}.cq-card-search-results{right:0;left:auto;width:min(360px,calc(100vw - 28px))}}
 .cq-deck-scroller{z-index:0}
 .cq-deck-layer{bottom:60px}
@@ -378,6 +387,28 @@ html.dark .cq-score-tooltip{border-color:#3a4037;background:#252824;color:#e7e7d
 .cq-visible-tags{flex-wrap:wrap}
 .cq-action-defer small{position:absolute;bottom:-3px;right:-4px;background:#fff2c7;border-radius:3px;font-size:9px}
 
+/* Remind-me-later: hover dropdown on the card action, sidebar parking list. */
+.cq-remind-menu{position:relative}
+.cq-remind-popover{position:absolute;top:calc(100% + 7px);right:0;z-index:60;width:max-content;min-width:128px;padding:5px;border:1px solid var(--cq-line);border-radius:11px;background:var(--cq-paper);box-shadow:0 14px 36px #26312424;color:var(--cq-ink);opacity:0;visibility:hidden;pointer-events:none;transform:translateY(-3px);transition:opacity 120ms ease,transform 120ms ease,visibility 120ms}
+.cq-remind-popover::before{content:"";position:absolute;left:0;right:0;top:-7px;height:7px}
+.cq-remind-menu:hover>.cq-remind-popover,.cq-remind-menu:focus-within>.cq-remind-popover{opacity:1;visibility:visible;pointer-events:auto;transform:translateY(0)}
+.cq-remind-popover>button{display:flex;align-items:center;gap:8px;width:100%;min-height:31px;padding:0 9px;border:0;border-radius:7px;background:transparent;color:var(--cq-ink);font:inherit;font-size:12px;text-align:left;white-space:nowrap}
+.cq-remind-popover>button:hover,.cq-remind-popover>button:focus-visible{background:var(--cq-surface);outline:none}
+.cq-remind-option-icon{flex-shrink:0;font-size:12px}
+/* The reconnect frosted overlay paints at z-index 15, above the header's own
+   z-index 6 stacking context; lift the header while the remind dropdown is
+   open so the popover stays above the blur. */
+.cq-card-header:has(.cq-remind-menu:hover),
+.cq-card-header:has(.cq-remind-menu:focus-within) { z-index: 30; }
+.cq-remind-list{display:flex;flex-direction:column;gap:12px;flex:0 1 auto;min-height:0;max-height:34vh;overflow-y:auto;overscroll-behavior:contain;padding:2px}
+.cq-remind-card{flex-shrink:0}
+.cq-remind-card strong{margin:8px 0 2px}
+.cq-remind-countdown{margin-left:auto;font-family:ui-monospace,monospace;color:#967000;opacity:.85}
+.cq-remind-label{padding:3px 7px;border:1px solid #e2d494;border-radius:6px;background:#fff7d6;color:#8a711c;font-size:11px;font-weight:700;white-space:nowrap}
+html.dark .cq-remind-label{border-color:#6a5c2c;background:#3d3519;color:#e2c57e}
+html.dark .cq-remind-countdown{color:#e2c57e}
+@media (max-width:700px){.cq-remind-list{display:none}}
+
 .cq-card-workspace { display:flex; flex:1; min-height:0; min-width:0; overflow:hidden; }
 .cq-card-main { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; overflow:hidden; }
 .cq-card-side-terminal { display:flex; flex-direction:column; flex:0 0 var(--cq-side-terminal-width, 380px); width:var(--cq-side-terminal-width, 380px); min-width:0; min-height:0; overflow:hidden; border-left:1px solid var(--cq-line); background:var(--cq-paper); }
@@ -443,7 +474,6 @@ html.dark .cq-score-tooltip{border-color:#3a4037;background:#252824;color:#e7e7d
 .cq-inspection-overlay>.cq-static-card.cq-inspection-card{position:absolute;inset:auto;z-index:1;pointer-events:auto}
 
 .cq-confirm-actions{display:flex;justify-content:flex-end;gap:9px}.cq-confirm-actions>button{min-height:36px;padding:8px 14px;border:1px solid var(--cq-line);border-radius:8px;background:#fff;color:var(--cq-ink);font:inherit;font-size:12px;cursor:pointer}.cq-confirm-actions>.cq-primary{width:auto;margin:0;background:#b3443d;border-color:#a63d37;color:#fff}.cq-confirm-actions>.cq-primary:hover{background:#96352f}.cq-confirm-actions>button:disabled{opacity:.55;cursor:wait}
-.cq-confirm-actions>.cq-defer-confirm-button{background:#967000;border-color:#8b6700}.cq-confirm-actions>.cq-defer-confirm-button:hover{background:#795800}
 
 .cq-queue-arrival{position:absolute;top:58px;z-index:35;display:flex;align-items:center;gap:10px;width:min(266px,calc(70% - 14px));min-height:76px;max-height:92px;padding:10px 16px;border:1px solid var(--cq-line);border-radius:0 11px 11px 0;background:color-mix(in srgb,var(--cq-paper) 72%,transparent);color:var(--cq-ink);box-shadow:0 12px 30px #26312420;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);text-align:left;font:inherit;overflow:hidden}
 .cq-queue-arrival[data-side="left"]{left:0;border-left:3px solid #8da27e;animation:cq-arrival-left 5s cubic-bezier(.2,.75,.25,1) both}
@@ -682,7 +712,7 @@ html.dark .cq-inline-tools { --bg-hover: #30362e; --bg-selected: #394036; --text
 
 .cq-archive-skip{display:flex;align-items:flex-start;gap:9px;margin:18px 0 22px;font-size:13px;cursor:pointer}.cq-archive-skip input{width:15px;height:15px;margin:2px 0 0;accent-color:var(--cq-ink)}.cq-archive-skip small{display:block;margin-top:5px;color:var(--cq-muted);font-size:12px;line-height:1.5}
 
-/* TopCard supports the same light/dark contract as Pi Web. Keep these
+/* Cue supports the same light/dark contract as Pi Web. Keep these
    overrides last because the v2 treatment above intentionally refines many
    of the original light-only component surfaces. */
 html.dark .cq-shell {
@@ -702,7 +732,6 @@ html.dark .cq-back-card,
 html.dark .cq-task-panel,
 html.dark .cq-workspace-picker,
 html.dark .cq-card-search-results,
-html.dark .cq-priority-popover,
 html.dark .cq-confirm-actions > button,
 html.dark .cq-urgent-dialog {
   border-color: var(--cq-line);
@@ -800,10 +829,28 @@ html.dark .cq-priority-popover {
   box-shadow: 0 16px 42px #0009, 0 3px 9px #0007;
 }
 
+/* The weight popover portals to document.body, outside .cq-shell's scope, so
+   the --cq-* custom properties are undefined there and var() overrides would
+   resolve to nothing (transparent background). Use the dark palette literals,
+   mirroring html.dark .cq-shell. */
+html.dark .cq-priority-popover {
+  border-color: #3b413b;
+  background: #232623;
+  color: #e7ebe5;
+}
+
+html.dark .cq-priority-popover label {
+  color: #e7ebe5;
+}
+
+html.dark .cq-priority-popover small {
+  color: #a4aaa1;
+}
+
 html.dark .cq-priority-popover input {
-  border-color: var(--cq-line);
-  background: var(--cq-surface);
-  color: var(--cq-ink);
+  border-color: #3b413b;
+  background: #191c1a;
+  color: #e7ebe5;
 }
 
 html.dark .cq-content-toolbar .cq-insertion-position,
@@ -879,10 +926,6 @@ html.dark .cq-score-chip[style] {
 html.dark .cq-score-total,
 html.dark .cq-score-operator {
   color: var(--cq-muted);
-}
-
-html.dark .cq-action-defer small {
-  background: #463d23;
 }
 
 html.dark .cq-deck-layer::after {
@@ -1016,35 +1059,37 @@ html.dark .cq-explorer-heading [aria-pressed="true"] {
 /* Native window controls sit over this application-colored drag region. */
 .desktop-window-chrome { height: 36px; flex: 0 0 36px; background: #f1f2ef; -webkit-app-region: drag; app-region: drag; user-select: none; }
 html.dark .desktop-window-chrome { background: #191c1a; }
-html.topcard-desktop .cq-shell { height: calc(100dvh - 36px); }
-html.topcard-desktop .cq-shell :is(button, input, textarea, select, a) { -webkit-app-region: no-drag; app-region: no-drag; }
+html.cue-desktop .cq-shell { height: calc(100dvh - 36px); }
+html.cue-desktop .cq-shell :is(button, input, textarea, select, a) { -webkit-app-region: no-drag; app-region: no-drag; }
 /* Only the toolbar strip is draggable; card gestures remain native scrolling. */
-html.topcard-desktop .cq-content-drag {
+html.cue-desktop .cq-content-drag {
   position: absolute; top: 0; left: 0; right: 0; height: 48px; z-index: 40;
 }
-html.topcard-desktop :is(.cq-content-toolbar, .cq-card-search) {
+html.cue-desktop :is(.cq-content-toolbar, .cq-card-search) {
   z-index: 50; -webkit-app-region: no-drag; app-region: no-drag; pointer-events: auto;
 }
 
-/* macOS controls belong visually to the sidebar, not a full-width title strip. */
+/* Window controls belong visually to the sidebar, not a full-width title strip.
+   Applies to every frameless platform: macOS keeps its traffic lights top-left,
+   Windows/Linux render their in-app buttons top-right. */
 html[data-desktop-platform="darwin"] .desktop-window-chrome {
   position: fixed; top: 0; left: 0; width: 112px; height: 50px;
   z-index: 1000; background: transparent;
 }
-html[data-desktop-platform="darwin"] .desktop-drag-sidebar {
+html.cue-desktop .desktop-drag-sidebar {
   position: fixed; top: 0; left: 0; width: 246px; height: 50px; z-index: 30;
 }
 @media (max-width: 1050px) {
-  html[data-desktop-platform="darwin"] .desktop-drag-sidebar { width: 210px; }
+  html.cue-desktop .desktop-drag-sidebar { width: 210px; }
 }
-html[data-desktop-platform="darwin"] .cq-shell { height: 100dvh; }
-html[data-desktop-platform="darwin"] .cq-sidebar { padding-top: 60px; }
-html[data-desktop-platform="darwin"] .cq-task-left { padding-top: 60px; }
-html[data-desktop-platform="darwin"] :is(.cq-sidebar, .cq-task-left)::before {
+html.cue-desktop .cq-shell { height: 100dvh; }
+html.cue-desktop .cq-sidebar { padding-top: 60px; }
+html.cue-desktop .cq-task-left { padding-top: 60px; }
+html.cue-desktop :is(.cq-sidebar, .cq-task-left)::before {
   content: ""; position: absolute; top: 0; left: 0; right: 0; height: 42px;
   -webkit-app-region: drag; app-region: drag;
 }
-html[data-desktop-platform="darwin"] .cq-task-left-drag {
+html.cue-desktop .cq-task-left-drag {
   display: block; top: 0; bottom: auto; height: 42px; z-index: 1;
 }
 html[data-desktop-platform="darwin"] .cq-detached-layout:not(:has(.cq-task-left.sidebar-open)) .cq-card-header {
@@ -1067,19 +1112,58 @@ html[data-desktop-platform="darwin"] .cq-detached .cq-task-panel-heading button 
   position: absolute; top: 0; left: 0; right: 0; height: 52px; z-index: 2;
 }
 
-/* Keep native window controls and the 34px toolbar on the same 32px centerline. */
-html.topcard-desktop:not([data-desktop-platform="darwin"]) .desktop-window-chrome {
+/* Windows/Linux are frameless too; the in-app controls live in the reserved top-right zone. */
+html.cue-desktop:not([data-desktop-platform="darwin"]) .desktop-window-chrome {
   position: fixed; top: 0; right: 0; width: 150px; height: 64px;
   z-index: 1000; background: transparent;
 }
-html.topcard-desktop:not([data-desktop-platform="darwin"]) .cq-shell { height: 100dvh; }
-html.topcard-desktop:not([data-desktop-platform="darwin"]) .cq-card-search {
+html.cue-desktop:not([data-desktop-platform="darwin"]) .cq-card-search {
   left: 50%; right: auto; transform: translateX(-50%);
-  width: min(460px, max(100px, calc(100% - 320px)));
+  width: var(--cq-search-width, min(460px, max(100px, calc(100% - 320px))));
 }
-html.topcard-desktop:not([data-desktop-platform="darwin"]) .cq-detached .cq-card-header {
+html.cue-desktop:not([data-desktop-platform="darwin"]) .cq-detached .cq-card-header {
   padding-right: 160px;
 }
+/* Detached card windows on Windows/Linux need the same drag affordances as macOS. */
+html.cue-desktop:not([data-desktop-platform="darwin"]) .cq-detached .cq-card-header,
+html.cue-desktop:not([data-desktop-platform="darwin"]) .cq-detached .cq-task-panel-heading,
+html.cue-desktop:not([data-desktop-platform="darwin"]) .cq-detached .cq-detached-window-drag,
+html.cue-desktop:not([data-desktop-platform="darwin"]) .cq-detached .cq-detached-drag {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+/* In-app window controls: flat, native-look, flush to the top-right corner. */
+.desktop-window-controls {
+  position: fixed; top: 0; right: 0; z-index: 1100;
+  display: flex; align-items: stretch; height: 36px;
+  -webkit-app-region: no-drag; app-region: no-drag;
+}
+.desktop-window-controls button {
+  position: relative; width: 46px; padding: 0; margin: 0;
+  border: 0; border-radius: 0; cursor: pointer; background: transparent;
+}
+html.dark .desktop-window-controls button:hover { background: rgba(255, 255, 255, 0.12); }
+html:not(.dark) .desktop-window-controls button:hover { background: rgba(0, 0, 0, 0.08); }
+.desktop-window-controls .dwc-close:hover { background: #e81123 !important; }
+.desktop-window-controls button::after {
+  content: ""; position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font: 400 11px/1 "Segoe UI Symbol", system-ui, sans-serif;
+  color: var(--cq-muted, #5f5e5a);
+  pointer-events: none;
+}
+.desktop-window-controls .dwc-close::after { color: var(--cq-ink, #2c2c2a); }
+.desktop-window-controls .dwc-close:hover::after { color: #fff; }
+.desktop-window-controls .dwc-min::after { content: "─"; font-size: 13px; letter-spacing: 0; }
+.desktop-window-controls .dwc-max::after { content: ""; border: 1px solid currentColor; width: 9px; height: 9px; margin: auto; inset: 0; position: absolute; color: var(--cq-muted, #5f5e5a); }
+.desktop-window-controls .dwc-max[data-maximized="true"]::after { content: ""; width: 8px; height: 8px; }
+.desktop-window-controls .dwc-max[data-maximized="true"]::before {
+  content: ""; position: absolute; top: 11px; right: 17px;
+  width: 9px; height: 9px; border: 1px solid var(--cq-muted, #5f5e5a);
+  border-top: 0; border-right: 0;
+}
+.desktop-window-controls .dwc-close::after { content: "✕"; font-size: 10px; }
 
 /* Card-scoped feedback overlays never change terminal rows or card geometry. */
 .cq-harness-error-toast {
@@ -1134,3 +1218,11 @@ html .terminal-panel[data-terminal-theme="campbell"],
 .cq-harness-body[data-disconnected="true"] .terminal-panel-messages { display:none; }
 
 .cq-terminal-recovery-return { top:auto; bottom:16px; right:16px; font-size:12px; padding:8px 12px; box-shadow:0 3px 12px #0001; }
+
+/* The SSH auth dialog also portals to document.body, outside .cq-shell's
+   scope: same dark-mode var() pitfall as the weight popover. Mirror
+   html.dark .cq-shell with literals. */
+html.dark .machine-auth-dialog { border-color: #3b413b; background: #232623; color: #e7ebe5; }
+html.dark .machine-auth-dialog label { color: #a4aaa1; }
+html.dark .machine-auth-dialog pre { background: #191c1a; }
+html.dark .machine-auth-dialog input { border-color: #3b413b; background: #191c1a; color: #e7ebe5; }

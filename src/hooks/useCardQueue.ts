@@ -1,9 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { markQueueCardWorking, mergeQueueSnapshot, QUEUE_SSE_REFRESH_MS, queueFallbackPollMs, queuePollIntervalMs } from "@/lib/card-queue-snapshot";
+import { mergeQueueSnapshot, QUEUE_SSE_REFRESH_MS, queueFallbackPollMs, queuePollIntervalMs } from "@/lib/card-queue-snapshot";
 import type { CardQueue } from "@/lib/card-queue";
-import type { SessionInfo } from "@/lib/types";
 
 async function readJsonResponse<T>(response: Response): Promise<T> {
   const body = await response.text();
@@ -20,21 +19,12 @@ export function useCardQueue() {
   const bootstrapped = useRef(false);
   const localGeneration = useRef(0);
   const lifetime = useRef(0);
-  const pendingWorking = useRef(new Map<string, SessionInfo | undefined>());
   const queueRef = useRef<CardQueue | null>(null);
   const request = useRef<{ generation: number; controller: AbortController; promise: Promise<void> } | null>(null);
   const accept = useCallback((next: CardQueue & { defaultCwd?: string }) => {
     if (!mounted.current) return;
-    for (const cardId of pendingWorking.current.keys()) {
-      if (next.cards.some((card) => card.id === cardId && card.session)) {
-        pendingWorking.current.delete(cardId);
-      }
-    }
     setQueue((previous) => {
-      let merged = mergeQueueSnapshot(previous, next);
-      for (const [cardId, session] of pendingWorking.current) {
-        merged = markQueueCardWorking(merged, cardId, session);
-      }
+      const merged = mergeQueueSnapshot(previous, next);
       queueRef.current = merged;
       return merged;
     });
@@ -68,29 +58,6 @@ export function useCardQueue() {
     })();
     return current.promise;
   }, [accept]);
-  const markWorking = useCallback((cardId: string, session?: SessionInfo, pendingAttachment = false) => {
-    // Move immediately once submission starts and discard older poll snapshots.
-    localGeneration.current += 1;
-    if (pendingAttachment) pendingWorking.current.set(cardId, session);
-    else pendingWorking.current.delete(cardId);
-    setQueue((current) => {
-      const next = current ? markQueueCardWorking(current, cardId, session) : current;
-      queueRef.current = next;
-      return next;
-    });
-    if (!pendingAttachment) void refresh();
-  }, [refresh]);
-  const rollbackWorking = useCallback((cardId: string) => {
-    pendingWorking.current.delete(cardId);
-    localGeneration.current += 1;
-    setQueue((current) => current ? {
-      ...current,
-      cards: current.cards.map((card) => card.id === cardId && !card.session
-        ? { ...card, phase: "draft" as const }
-        : card),
-    } : current);
-    void refresh();
-  }, [refresh]);
   const act = useCallback(async (action: string, data: Record<string, unknown> = {}) => {
     const generation = localGeneration.current;
     const owner = lifetime.current;
@@ -153,5 +120,5 @@ export function useCardQueue() {
       document.removeEventListener("visibilitychange", reconcile);
     };
   }, [refresh]);
-  return { queue, defaultCwd, error, refresh, act, markWorking, rollbackWorking };
+  return { queue, defaultCwd, error, refresh, act };
 }

@@ -2,8 +2,8 @@ use crate::error::AppResult;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-const START: &str = "__TOPCARD_ENV_START__";
-const END: &str = "__TOPCARD_ENV_END__";
+const START: &str = "__CUE_ENV_START__";
+const END: &str = "__CUE_ENV_END__";
 
 pub async fn local_environment(force: bool) -> AppResult<HashMap<String, String>> {
     let _ = force;

@@ -60,10 +60,10 @@ impl IfEmpty for &str {
 
 fn cursor_hook_pattern() -> &'static Regex {
     static PATTERN: OnceLock<Regex> = OnceLock::new();
-    PATTERN.get_or_init(|| Regex::new(r#"[\\/](?:harness-plugins[\\/]cursor|\.cache[\\/]topcard[\\/]harness)[\\/].*hook\.cjs"#).unwrap())
+    PATTERN.get_or_init(|| Regex::new(r#"[\\/](?:harness-plugins[\\/]cursor|\.cache[\\/]cue[\\/]harness)[\\/].*hook\.cjs"#).unwrap())
 }
 
-pub fn is_topcard_cursor_command(command: &str, hook_path: &str) -> bool {
+pub fn is_cue_cursor_command(command: &str, hook_path: &str) -> bool {
     let pattern = cursor_hook_pattern();
     if command.contains(hook_path) || pattern.is_match(command) {
         return true;
@@ -98,7 +98,7 @@ pub fn merge_cursor_user_hooks(existing: Value, incoming: &Value, hook_path: &st
             let previous = hooks.get(event).and_then(|v| v.as_array()).cloned().unwrap_or_default();
             let kept: Vec<Value> = previous
                 .into_iter()
-                .filter(|entry| !is_topcard_cursor_command(entry.get("command").and_then(|c| c.as_str()).unwrap_or(""), hook_path))
+                .filter(|entry| !is_cue_cursor_command(entry.get("command").and_then(|c| c.as_str()).unwrap_or(""), hook_path))
                 .collect();
             let extra = entries.as_array().cloned().unwrap_or_default();
             hooks.insert(event.clone(), Value::Array(kept.into_iter().chain(extra).collect()));
@@ -127,7 +127,7 @@ pub fn antigravity_owned(existing: &Value, command_for: &dyn Fn(&str) -> String)
                                 && handlers.iter().all(|handler| {
                                     handler.get("command").and_then(|c| c.as_str()).is_some_and(|command| {
                                         command == command_for(event)
-                                            || Regex::new(r#"[\\/]\.topcard[\\/]harness-plugins[\\/]antigravity[\\/]hook\.cjs["']"#)
+                                            || Regex::new(r#"[\\/]\.cue[\\/]harness-plugins[\\/]antigravity[\\/]hook\.cjs["']"#)
                                                 .unwrap()
                                                 .is_match(command)
                                     })
@@ -141,7 +141,7 @@ pub fn grok_owned(path: &Path) -> AppResult<()> {
     match std::fs::read_to_string(path) {
         Ok(raw) => {
             let existing: Value = serde_json::from_str(&raw)?;
-            if existing.get("topcardManaged") != Some(&json!(true)) {
+            if existing.get("cueManaged") != Some(&json!(true)) {
                 return Err(AppError::msg("Grok hook 同名文件不属于 Cue，未覆盖"));
             }
             Ok(())
@@ -160,7 +160,7 @@ pub fn antigravity_guard(path: &Path, command_for: &dyn Fn(&str) -> String) -> A
     if !config.is_object() || config.is_array() {
         return Err(AppError::msg("Invalid Antigravity hooks configuration"));
     }
-    if let Some(existing) = config.get("topcard-session-state") {
+    if let Some(existing) = config.get("cue-session-state") {
         if !antigravity_owned(existing, command_for) {
             return Err(AppError::msg("Antigravity hook 同名条目不属于 Cue，未覆盖"));
         }
@@ -169,7 +169,7 @@ pub fn antigravity_guard(path: &Path, command_for: &dyn Fn(&str) -> String) -> A
 }
 
 pub fn cursor_user_hooks_path() -> PathBuf {
-    if let Ok(path) = std::env::var("TOPCARD_CURSOR_HOOKS") {
+    if let Ok(path) = std::env::var("CUE_CURSOR_HOOKS") {
         return PathBuf::from(path);
     }
     dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".cursor/hooks.json")
@@ -181,19 +181,19 @@ mod tests {
 
     #[test]
     fn cursor_merge_keeps_foreign_and_replaces_owned() {
-        let hook = "/home/u/.cache/topcard/harness/newtoken/hook.cjs";
+        let hook = "/home/u/.cache/cue/harness/newtoken/hook.cjs";
         let existing = json!({
             "version": 1,
             "hooks": {
                 "beforeSubmitPrompt": [
                     { "command": "echo foreign" },
-                    { "command": "/home/u/.cache/topcard/harness/oldtoken/hook.cjs" }
+                    { "command": "/home/u/.cache/cue/harness/oldtoken/hook.cjs" }
                 ]
             }
         });
         let incoming = json!({
             "hooks": {
-                "beforeSubmitPrompt": [{ "command": format!("TOPCARD_HARNESS_KIND=cursor /usr/bin/node {hook} beforeSubmitPrompt") }]
+                "beforeSubmitPrompt": [{ "command": format!("CUE_HARNESS_KIND=cursor /usr/bin/node {hook} beforeSubmitPrompt") }]
             }
         });
         let merged = merge_cursor_user_hooks(existing, &incoming, hook).unwrap();
@@ -205,7 +205,7 @@ mod tests {
             .collect();
         assert_eq!(commands, vec![
             "echo foreign",
-            "TOPCARD_HARNESS_KIND=cursor /usr/bin/node /home/u/.cache/topcard/harness/newtoken/hook.cjs beforeSubmitPrompt",
+            "CUE_HARNESS_KIND=cursor /usr/bin/node /home/u/.cache/cue/harness/newtoken/hook.cjs beforeSubmitPrompt",
         ]);
     }
 
@@ -219,10 +219,10 @@ mod tests {
     fn grok_refuses_unowned_file() {
         let dir = std::env::temp_dir().join(format!("cue-grok-{}", uuid::Uuid::new_v4().simple()));
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("topcard-session-state.json");
+        let path = dir.join("cue-session-state.json");
         std::fs::write(&path, r#"{"hooks":{}}"#).unwrap();
         assert!(grok_owned(&path).is_err());
-        std::fs::write(&path, r#"{"topcardManaged":true}"#).unwrap();
+        std::fs::write(&path, r#"{"cueManaged":true}"#).unwrap();
         assert!(grok_owned(&path).is_ok());
         let _ = std::fs::remove_dir_all(dir);
     }

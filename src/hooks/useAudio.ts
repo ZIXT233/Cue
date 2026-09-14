@@ -4,7 +4,7 @@ import { persistentStorage } from "../lib/persistent-storage.ts";
 
 import { useState, useRef, useCallback, useEffect } from "react";
 
-const SOUND_CHANGED = "topcard:sound-changed";
+const SOUND_CHANGED = "cue:sound-changed";
 let pageAudioContext: AudioContext | null = null;
 
 function playTone(ctx: AudioContext) {
@@ -60,7 +60,7 @@ function playRightArrivalTone(ctx: AudioContext) {
 export function useAudio() {
   const [enabled, setEnabled] = useState<boolean>(() => {
     if (typeof window === "undefined") return true;
-    const stored = persistentStorage().getItem("topcard:sound-enabled");
+    const stored = persistentStorage().getItem("cue:sound-enabled");
     return stored === null ? true : stored === "true";
   });
 
@@ -69,7 +69,7 @@ export function useAudio() {
 
   useEffect(() => {
     const sync = () => {
-      const stored = persistentStorage().getItem("topcard:sound-enabled");
+      const stored = persistentStorage().getItem("cue:sound-enabled");
       enabledRef.current = stored === null || stored === "true";
       setEnabled(enabledRef.current);
     };
@@ -103,7 +103,7 @@ export function useAudio() {
     const next = !enabledRef.current;
     if (next) unlockAudio(true);
     enabledRef.current = next;
-    persistentStorage().setItem("topcard:sound-enabled", String(next));
+    persistentStorage().setItem("cue:sound-enabled", String(next));
     setEnabled(next);
     window.dispatchEvent(new Event(SOUND_CHANGED));
   }, [unlockAudio]);

@@ -163,4 +163,4 @@ Packaged Dock / Start Menu icons need a fresh desktop build (or reinstall). `tau
 
 App data lives in `~/.cue`.
 
-Harness hook environment variables stay `TOPCARD_HARNESS_*` so CLI communication matches the original protocol.
+Harness hook environment variables are `CUE_HARNESS_*`; the OSC reply tag is `\x1b]777;cue;…`.

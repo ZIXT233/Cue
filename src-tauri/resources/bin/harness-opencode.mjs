@@ -3,9 +3,9 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 // Lifecycle boundaries follow Orca's OpenCode status plugin; see docs/harness/opencode.
-export const TopCardState = async ({ client }) => {
+export const CueState = async ({ client }) => {
   const sessions = new Map();
-  let owner = process.env.TOPCARD_HARNESS_SESSION_ID;
+  let owner = process.env.CUE_HARNESS_SESSION_ID;
   let sequence = Promise.resolve();
   let lastSignalAt = 0;
   const enqueue = work => (sequence = sequence.then(work).catch(() => {}));
@@ -20,14 +20,14 @@ export const TopCardState = async ({ client }) => {
         title: typeof info.title === 'string' ? info.title.slice(0, 160) : undefined,
         ...extra,
       };
-      const token = process.env.TOPCARD_HARNESS_CHANNEL;
+      const token = process.env.CUE_HARNESS_CHANNEL;
       if (token) {
         fs.writeFileSync(
-          process.env.TOPCARD_HARNESS_TTY || '/dev/tty',
-          `\x1b]777;topcard;${Buffer.from(JSON.stringify({ token, signal })).toString('base64')}\x07`,
+          process.env.CUE_HARNESS_TTY || '/dev/tty',
+          `\x1b]777;cue;${Buffer.from(JSON.stringify({ token, signal })).toString('base64')}\x07`,
         );
-      } else if (process.env.TOPCARD_HARNESS_SIGNAL_DIR) {
-        const file = path.join(process.env.TOPCARD_HARNESS_SIGNAL_DIR, `${signal.at}-${randomUUID()}.json`);
+      } else if (process.env.CUE_HARNESS_SIGNAL_DIR) {
+        const file = path.join(process.env.CUE_HARNESS_SIGNAL_DIR, `${signal.at}-${randomUUID()}.json`);
         fs.writeFileSync(`${file}.tmp`, JSON.stringify(signal), { mode: 0o600 });
         fs.renameSync(`${file}.tmp`, file);
       }
@@ -142,4 +142,4 @@ export const TopCardState = async ({ client }) => {
   };
 };
 
-export default TopCardState;
+export default CueState;

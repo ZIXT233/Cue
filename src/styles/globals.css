@@ -603,7 +603,9 @@ button.extension-widget-trigger:focus-visible {
 }
 
 :root {
-  --font-mono: var(--font-noto-mono), 'JetBrains Mono', 'Fira Code', 'Consolas', ui-monospace, 'PingFang SC', 'Microsoft YaHei', monospace;
+  /* Cascadia ships with Windows 11 and covers Block Elements (U+2580–U+259F),
+     so TUI pixel art (Claude Code logo) must not fall back per-glyph. */
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Cascadia Mono', 'Consolas', ui-monospace, 'PingFang SC', 'Microsoft YaHei', monospace;
 }
 
 pre, code {
@@ -1736,15 +1738,15 @@ html .terminal-panel[data-terminal-theme="campbell"] { --terminal-bg:#0C0C0C; ba
 ::view-transition-new(root) { z-index: 2; }
 
 /* Desktop chrome is not document content. Keep actual content selectable. */
-html.topcard-desktop body {
+html.cue-desktop body {
   -webkit-user-select: none;
   user-select: none;
 }
-html.topcard-desktop :is(input, textarea, [contenteditable="true"], .markdown-body, [data-message-text], pre, .file-viewer-content) {
+html.cue-desktop :is(input, textarea, [contenteditable="true"], .markdown-body, [data-message-text], pre, .file-viewer-content) {
   -webkit-user-select: text;
   user-select: text;
 }
-html.topcard-desktop :is(button, [role="button"], [role="menuitem"], [role="menuitemradio"], summary) {
+html.cue-desktop :is(button, [role="button"], [role="menuitem"], [role="menuitemradio"], summary) {
   -webkit-user-select: none;
   user-select: none;
 }

@@ -163,4 +163,4 @@ npx tauri icon src-tauri/icons/cue-mark.svg
 
 应用数据在 `~/.cue`。
 
-Harness hook 环境变量仍是 `TOPCARD_HARNESS_*`，以便和原有 CLI 协议对齐。
+Harness hook 环境变量为 `CUE_HARNESS_*`，OSC 回传标记为 `\x1b]777;cue;…`。

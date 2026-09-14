@@ -6,5 +6,5 @@ pi,正常,正常,正常,正常,正常,事件时读session文件：session_info.n
 omp,正常,正常,正常,正常,正常,事件时读session文件：title → session_info.name → 会话第一条prompt → hook最后一次prompt → Oh My Pi · 工作区
 grok,正常,正常,正常,正常,正常,事件时读session文件：summary.generated_title → 会话第一条prompt → hook最后一次prompt → Grok Build · 工作区
 antigravity,,,,,,无稳定session文件：hook最后一次prompt → Antigravity CLI · 工作区
-opencode,正常,正常,正常,正常,正常,稳定OSC info.title → hook最后一次prompt → OpenCode · 工作区
+opencode,正常,正常,正常,正常,正常,稳定OSC info.title（过滤 New session 默认值）→ hook首条prompt → hook最后一次prompt → OpenCode · 工作区
 shell,,,,,,工作区名

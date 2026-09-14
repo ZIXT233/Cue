@@ -148,6 +148,10 @@ pub struct QueueCard {
     pub tag_history: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived_at: Option<i64>,
+    /// Unix ms deadline while the card is parked in "remind me later".
+    /// None means the card is a normal queue card.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remind_at: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detached: Option<DetachedLease>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

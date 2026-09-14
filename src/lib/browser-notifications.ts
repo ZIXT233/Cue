@@ -1,4 +1,17 @@
+import { invoke } from "@tauri-apps/api/core";
 import type { BlockingExtensionUiRequest, ExtensionUiRequest } from "./types";
+
+export type NotificationDelivery = "tauri" | "service-worker" | "window" | null;
+
+/**
+ * True when the frontend runs inside the Tauri WebView. The web Notification
+ * API is unusable there (missing in WKWebView, never granted in WebView2), so
+ * delivery must go through the native notification plugin instead.
+ */
+export function isTauriRuntime(): boolean {
+  return typeof window !== "undefined"
+    && ("__TAURI_INTERNALS__" in window || "__TAURI__" in window || window.cueDesktop !== undefined);
+}
 
 interface WindowNotificationLike {
   onclick: Notification["onclick"];
@@ -18,11 +31,10 @@ export interface BrowserNotificationOptions {
   title: string;
   body: string;
   sessionUrl: string;
+  cardId?: string;
   onClick: () => void;
   tag?: string;
 }
-
-export type NotificationDelivery = "service-worker" | "window" | null;
 
 type DocumentAttentionState = Pick<Document, "visibilityState" | "hasFocus">;
 
@@ -70,10 +82,29 @@ export async function showBrowserNotification(
   options: BrowserNotificationOptions,
   environment: BrowserNotificationEnvironment = getBrowserEnvironment(),
 ): Promise<NotificationDelivery> {
+  // Inside the Tauri WebView the web Notification API cannot reach the OS
+  // notification center, so the native channel is the only working one. The
+  // Rust command routes through user-notify (click callback on macOS) and
+  // falls back to the tauri notification plugin where that is unsupported.
+  if (isTauriRuntime()) {
+    try {
+      await invoke("send_completion_notification", {
+        title: options.title,
+        body: options.body,
+        cardId: options.cardId ?? "",
+        sessionUrl: options.sessionUrl,
+      });
+      return "tauri";
+    } catch (err) {
+      console.warn("[cue] native notification command failed:", err);
+      return null;
+    }
+  }
+
   const notificationOptions: NotificationOptions = {
     body: options.body,
-    icon: "/icons/topcard-192.png",
-    // TopCard owns the completion sound; the system notification is visual only.
+    icon: "/icons/cue-192.png",
+    // Cue owns the completion sound; the system notification is visual only.
     silent: true,
     ...(options.tag ? { tag: options.tag, renotify: true } : {}),
   };
@@ -98,7 +129,7 @@ export async function showBrowserNotification(
     notification.onclick = () => {
       notification.close();
       const desktop = typeof window !== "undefined"
-        ? (window as Window & { topcardDesktop?: { openNotification?: (url: string) => void } }).topcardDesktop
+        ? (window as Window & { cueDesktop?: { openNotification?: (url: string) => void } }).cueDesktop
         : undefined;
       if (desktop?.openNotification) {
         desktop.openNotification(options.sessionUrl);

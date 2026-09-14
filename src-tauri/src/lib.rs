@@ -7,6 +7,7 @@ mod harness;
 mod hosts;
 mod live;
 mod models;
+mod notify;
 mod paste;
 mod paths;
 mod queue;
@@ -39,9 +40,10 @@ pub fn run() {
             app.manage(state.terminals.clone());
             let port = tauri::async_runtime::block_on(start_server(state)).map_err(|e| e.to_string())?;
             app.manage(ApiPort(Mutex::new(port)));
+            notify::init(&app.handle().clone());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![api_base])
+        .invoke_handler(tauri::generate_handler![api_base, notify::send_completion_notification, notify::open_notification_settings])
         .build(tauri::generate_context!())
         .expect("error while building Cue")
         .run(|app, event| {

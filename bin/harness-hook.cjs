@@ -10,9 +10,9 @@ function cursorReply(event) {
   if (event === 'beforeShellExecution' || event === 'beforeMCPExecution') return { permission: 'ask' };
   return {};
 }
-const kind = process.env.TOPCARD_HARNESS_KIND || (cursorEvents.has(explicitEvent) ? 'cursor' : undefined);
-const token = process.env.TOPCARD_HARNESS_CHANNEL;
-const envDirectory = process.env.TOPCARD_HARNESS_SIGNAL_DIR;
+const kind = process.env.CUE_HARNESS_KIND || (cursorEvents.has(explicitEvent) ? 'cursor' : undefined);
+const token = process.env.CUE_HARNESS_CHANNEL;
+const envDirectory = process.env.CUE_HARNESS_SIGNAL_DIR;
 const activePath = path.join(__dirname, 'active.json');
 // Cursor observe hooks ignore stdout, but answering before stdin is fully read
 // lets the worker tear the process down before replyPreview is written. Reply
@@ -80,7 +80,7 @@ function consume() {
       notification: payload.notification_type ?? payload.notificationType ?? payload.type,
       prompt: ['UserPromptSubmit', 'beforeSubmitPrompt', 'BeforeAgent'].includes(eventName) ? text(payload.prompt) : undefined };
     const directory = envDirectory || (kind === 'cursor' ? undefined : legacyActiveDirectory());
-    const debug = process.env.TOPCARD_HARNESS_DEBUG === '1';
+    const debug = process.env.CUE_HARNESS_DEBUG === '1';
     // Keep only field metadata, never prompt/reply text, to diagnose missing previews.
     if (debug && kind === 'codex' && directory && eventName === 'Stop') {
       try {
@@ -101,7 +101,7 @@ function consume() {
     if (channel) {
       try {
         const signal = Buffer.from(JSON.stringify({ token: channel, signal: event })).toString('base64');
-        fs.writeFileSync(process.env.TOPCARD_HARNESS_TTY || '/dev/tty', `\x1b]777;topcard;${signal}\x07`);
+        fs.writeFileSync(process.env.CUE_HARNESS_TTY || '/dev/tty', `\x1b]777;cue;${signal}\x07`);
         delivered.osc = true;
       } catch (error) {
         delivered.oscError = error instanceof Error ? error.message : String(error);

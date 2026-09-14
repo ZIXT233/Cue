@@ -39,10 +39,10 @@ pub async fn prepare_hook_launch(
         }
         let digest = hex::encode(&Sha256::digest(source.as_bytes())[..8]);
         root = PathBuf::from(match kind {
-            "grok" => format!("{home}/.cache/topcard/harness-plugins/grok"),
-            "codex" => format!("{home}/.cache/topcard/harness-plugins/codex/{digest}"),
-            "cursor" => format!("{home}/.cache/topcard/harness-plugins/cursor"),
-            _ => format!("{home}/.cache/topcard/harness/{token}"),
+            "grok" => format!("{home}/.cache/cue/harness-plugins/grok"),
+            "codex" => format!("{home}/.cache/cue/harness-plugins/codex/{digest}"),
+            "cursor" => format!("{home}/.cache/cue/harness-plugins/cursor"),
+            _ => format!("{home}/.cache/cue/harness/{token}"),
         });
         if kind == "cursor" {
             cursor_config_path = Some(format!("{home}/.cursor/hooks.json"));
@@ -70,7 +70,7 @@ pub async fn prepare_hook_launch(
             return super::windows::windows_hook_command(&node, &hook_path, event, &[]);
         }
         // Bake kind so foreign IDE sessions still return the required JSON reply.
-        let prefix = if kind == "cursor" { "TOPCARD_HARNESS_KIND=cursor " } else { "" };
+        let prefix = if kind == "cursor" { "CUE_HARNESS_KIND=cursor " } else { "" };
         format!("{prefix}{}{}", [node.as_str(), hook_path.as_str()].into_iter().map(quote).collect::<Vec<_>>().join(" "), event.map(|e| format!(" {}", quote(e))).unwrap_or_default())
     };
     let command = command_for(None);
@@ -102,7 +102,7 @@ pub async fn prepare_hook_launch(
         for event in ["SessionStart", "BeforeAgent", "AfterAgent", "BeforeTool", "AfterTool", "Notification"] {
             let mut entries = hooks.get(event).and_then(|v| v.as_array()).cloned().unwrap_or_default();
             entries.push(serde_json::json!({
-                "hooks": [{ "type": "command", "name": format!("topcard-{event}"), "command": command, "timeout": gemini_timeout }]
+                "hooks": [{ "type": "command", "name": format!("cue-{event}"), "command": command, "timeout": gemini_timeout }]
             }));
             hooks.insert(event.into(), serde_json::Value::Array(entries));
         }
@@ -131,13 +131,13 @@ pub async fn prepare_hook_launch(
         for event in events {
             hooks.insert(event.into(), serde_json::json!([{ "hooks": [{ "type": "command", "command": command, "timeout": hook_timeout }] }]));
         }
-        files.insert("grok-hooks.json".into(), serde_json::json!({ "topcardManaged": true, "hooks": hooks }).to_string());
+        files.insert("grok-hooks.json".into(), serde_json::json!({ "cueManaged": true, "hooks": hooks }).to_string());
         grok_config_path = Some(if workspace.kind == "ssh" {
             let host = workspace.ssh_host.as_deref().unwrap();
-            format!("{}/hooks/topcard-session-state.json", String::from_utf8_lossy(&ssh_exec(host, r#"printf "%s" "${GROK_HOME:-$HOME/.grok}""#).await?).trim())
+            format!("{}/hooks/cue-session-state.json", String::from_utf8_lossy(&ssh_exec(host, r#"printf "%s" "${GROK_HOME:-$HOME/.grok}""#).await?).trim())
         } else {
             std::env::var("GROK_HOME").map(PathBuf::from).unwrap_or_else(|_| dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".grok"))
-                .join("hooks/topcard-session-state.json").to_string_lossy().into_owned()
+                .join("hooks/cue-session-state.json").to_string_lossy().into_owned()
         });
     } else if kind == "pi" || kind == "omp" {
         files.insert("pi-extension.mjs".into(), std::fs::read_to_string(bin_dir.join("harness-pi.mjs"))?);
@@ -151,7 +151,7 @@ pub async fn prepare_hook_launch(
         let cursor = kind == "cursor";
         files.insert(
             format!("{}/plugin.json", if cursor { ".cursor-plugin" } else { ".claude-plugin" }),
-            serde_json::json!({ "name": "topcard-session-state", "version": "1.0.0", "description": "Report this Cue terminal's lifecycle" }).to_string(),
+            serde_json::json!({ "name": "cue-session-state", "version": "1.0.0", "description": "Report this Cue terminal's lifecycle" }).to_string(),
         );
         let events: &[&str] = if cursor {
             &["sessionStart", "beforeSubmitPrompt", "preToolUse", "postToolUse", "postToolUseFailure", "beforeShellExecution", "beforeMCPExecution", "afterAgentResponse", "stop", "sessionEnd"]
@@ -188,24 +188,24 @@ pub async fn prepare_hook_launch(
         let installer = r#"const fs=require("node:fs"),p=require("node:path"),root=process.argv[1];for(const [name,body] of Object.entries(JSON.parse(Buffer.from(process.argv[2],"base64")))){const f=p.join(root,name);fs.mkdirSync(p.dirname(f),{recursive:true,mode:448});const tmp=f+"."+require("node:crypto").randomUUID()+".tmp";fs.writeFileSync(tmp,body,{mode:384});fs.renameSync(tmp,f);}"#;
         ssh_exec(host, &[shell_quote(&node), "-e".into(), shell_quote(installer), shell_quote(&root.to_string_lossy()), shell_quote(&payload)].join(" ")).await?;
         if let Some(path) = grok_config_path {
-            let install = r#"const fs=require("node:fs"),p=require("node:path"),src=process.argv[1],dest=process.argv[2];if(fs.existsSync(dest)&&JSON.parse(fs.readFileSync(dest,"utf8")).topcardManaged!==true)throw Error("Existing hook file is not owned by Cue");fs.mkdirSync(p.dirname(dest),{recursive:true,mode:448});fs.copyFileSync(src,dest);fs.chmodSync(dest,384);"#;
+            let install = r#"const fs=require("node:fs"),p=require("node:path"),src=process.argv[1],dest=process.argv[2];if(fs.existsSync(dest)&&JSON.parse(fs.readFileSync(dest,"utf8")).cueManaged!==true)throw Error("Existing hook file is not owned by Cue");fs.mkdirSync(p.dirname(dest),{recursive:true,mode:448});fs.copyFileSync(src,dest);fs.chmodSync(dest,384);"#;
             ssh_exec(host, &[shell_quote(&node), "-e".into(), shell_quote(install), shell_quote(&format!("{}/grok-hooks.json", root.display())), shell_quote(&path)].join(" ")).await?;
         }
         if let Some(path) = antigravity_config_path {
-            let installer = r#"const fs=require("node:fs"),p=require("node:path"),dest=process.argv[1],src=process.argv[2];const x=fs.existsSync(dest)?JSON.parse(fs.readFileSync(dest,"utf8")):{};if(x["topcard-session-state"]&&!JSON.stringify(x["topcard-session-state"]).includes("/topcard/"))throw Error("Hook name already owned");x["topcard-session-state"]=JSON.parse(fs.readFileSync(src,"utf8"));fs.mkdirSync(p.dirname(dest),{recursive:true});fs.writeFileSync(dest+".topcard.tmp",JSON.stringify(x,null,2),{mode:384});fs.renameSync(dest+".topcard.tmp",dest);"#;
+            let installer = r#"const fs=require("node:fs"),p=require("node:path"),dest=process.argv[1],src=process.argv[2];const x=fs.existsSync(dest)?JSON.parse(fs.readFileSync(dest,"utf8")):{};if(x["cue-session-state"]&&!JSON.stringify(x["cue-session-state"]).includes("/cue/"))throw Error("Hook name already owned");x["cue-session-state"]=JSON.parse(fs.readFileSync(src,"utf8"));fs.mkdirSync(p.dirname(dest),{recursive:true});fs.writeFileSync(dest+".cue.tmp",JSON.stringify(x,null,2),{mode:384});fs.renameSync(dest+".cue.tmp",dest);"#;
             ssh_exec(host, &[shell_quote(&node), "-e".into(), shell_quote(installer), shell_quote(&path), shell_quote(&format!("{}/antigravity-hooks.json", root.display()))].join(" ")).await?;
         }
         if let Some(path) = cursor_config_path {
-            let installer = r#"const fs=require("node:fs"),p=require("node:path"),dest=process.argv[1],src=process.argv[2],hook=process.argv[3];const owned=c=>{if(typeof c!=="string")return false;if(c.includes(hook))return true;const m=c.match(/-EncodedCommand\s+(\S+)/);if(m){try{const s=Buffer.from(m[1],"base64").toString("utf16le");if(s.includes(hook)||/[\\/](?:harness-plugins[\\/]cursor|\.cache[\\/]topcard[\\/]harness)[\\/].*hook\.cjs/.test(s))return true;}catch{}}return /[\\/](?:harness-plugins[\\/]cursor|\.cache[\\/]topcard[\\/]harness)[\\/].*hook\.cjs/.test(c)};const incoming=JSON.parse(fs.readFileSync(src,"utf8"));let x=fs.existsSync(dest)?JSON.parse(fs.readFileSync(dest,"utf8")):{};if(!x||Array.isArray(x)||typeof x!=="object")throw Error("Invalid Cursor hooks configuration");const hooks={...(x.hooks&&typeof x.hooks==="object"&&!Array.isArray(x.hooks)?x.hooks:{})};for(const [event,entries] of Object.entries(incoming.hooks||{})){const cur=Array.isArray(hooks[event])?hooks[event]:[];hooks[event]=[...cur.filter(e=>!owned(e&&e.command)),...entries];}x={...x,version:1,hooks};fs.mkdirSync(p.dirname(dest),{recursive:true,mode:448});fs.writeFileSync(dest+".topcard.tmp",JSON.stringify(x,null,2),{mode:384});fs.renameSync(dest+".topcard.tmp",dest);"#;
+            let installer = r#"const fs=require("node:fs"),p=require("node:path"),dest=process.argv[1],src=process.argv[2],hook=process.argv[3];const owned=c=>{if(typeof c!=="string")return false;if(c.includes(hook))return true;const m=c.match(/-EncodedCommand\s+(\S+)/);if(m){try{const s=Buffer.from(m[1],"base64").toString("utf16le");if(s.includes(hook)||/[\\/](?:harness-plugins[\\/]cursor|\.cache[\\/]cue[\\/]harness)[\\/].*hook\.cjs/.test(s))return true;}catch{}}return /[\\/](?:harness-plugins[\\/]cursor|\.cache[\\/]cue[\\/]harness)[\\/].*hook\.cjs/.test(c)};const incoming=JSON.parse(fs.readFileSync(src,"utf8"));let x=fs.existsSync(dest)?JSON.parse(fs.readFileSync(dest,"utf8")):{};if(!x||Array.isArray(x)||typeof x!=="object")throw Error("Invalid Cursor hooks configuration");const hooks={...(x.hooks&&typeof x.hooks==="object"&&!Array.isArray(x.hooks)?x.hooks:{})};for(const [event,entries] of Object.entries(incoming.hooks||{})){const cur=Array.isArray(hooks[event])?hooks[event]:[];hooks[event]=[...cur.filter(e=>!owned(e&&e.command)),...entries];}x={...x,version:1,hooks};fs.mkdirSync(p.dirname(dest),{recursive:true,mode:448});fs.writeFileSync(dest+".cue.tmp",JSON.stringify(x,null,2),{mode:384});fs.renameSync(dest+".cue.tmp",dest);"#;
             ssh_exec(host, &[shell_quote(&node), "-e".into(), shell_quote(installer), shell_quote(&path), shell_quote(&format!("{}/cursor-user-hooks.json", root.display())), shell_quote(&hook_path)].join(" ")).await?;
         }
-        extra_env.insert("TOPCARD_HARNESS_CHANNEL".into(), token.into());
-        extra_env.insert("TOPCARD_HARNESS_KIND".into(), kind.into());
+        extra_env.insert("CUE_HARNESS_CHANNEL".into(), token.into());
+        extra_env.insert("CUE_HARNESS_KIND".into(), kind.into());
         if crate::dev_tools::probes_enabled() {
-            extra_env.insert("TOPCARD_HARNESS_DEBUG".into(), "1".into());
+            extra_env.insert("CUE_HARNESS_DEBUG".into(), "1".into());
         }
         if kind == "cursor" {
-            extra_env.insert("TOPCARD_HARNESS_SIGNAL_DIR".into(), format!("{}/cards/{token}", root.display()));
+            extra_env.insert("CUE_HARNESS_SIGNAL_DIR".into(), format!("{}/cards/{token}", root.display()));
         }
         return Ok(HookLaunch { args, env: extra_env });
     }
@@ -223,7 +223,7 @@ pub async fn prepare_hook_launch(
     if let Some(path) = antigravity_config_path {
         let mut config = antigravity_guard(Path::new(&path), &|event: &str| command_for(Some(event)))?;
         if let Some(obj) = config.as_object_mut() {
-            obj.insert("topcard-session-state".into(), serde_json::from_str(files.get("antigravity-hooks.json").map(String::as_str).unwrap_or("{}"))?);
+            obj.insert("cue-session-state".into(), serde_json::from_str(files.get("antigravity-hooks.json").map(String::as_str).unwrap_or("{}"))?);
         }
         if let Some(parent) = Path::new(&path).parent() { std::fs::create_dir_all(parent)?; }
         atomic_write(Path::new(&path), &serde_json::to_string_pretty(&config)?)?;
@@ -240,10 +240,10 @@ pub async fn prepare_hook_launch(
             atomic_write(Path::new(&path), &serde_json::to_string_pretty(&merged)?)?;
         }
     }
-    extra_env.insert("TOPCARD_HARNESS_SIGNAL_DIR".into(), directory.to_string_lossy().into_owned());
-    extra_env.insert("TOPCARD_HARNESS_KIND".into(), kind.into());
+    extra_env.insert("CUE_HARNESS_SIGNAL_DIR".into(), directory.to_string_lossy().into_owned());
+    extra_env.insert("CUE_HARNESS_KIND".into(), kind.into());
     if crate::dev_tools::probes_enabled() {
-        extra_env.insert("TOPCARD_HARNESS_DEBUG".into(), "1".into());
+        extra_env.insert("CUE_HARNESS_DEBUG".into(), "1".into());
     }
     let _ = signal_dir(token);
     Ok(HookLaunch { args, env: extra_env })

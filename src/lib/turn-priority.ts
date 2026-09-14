@@ -39,7 +39,8 @@ export function scoreCard(card: QueueCard, tags: TurnTag[], now = Date.now()) {
 export function sortedQueue(state: CardQueue, now = Date.now()): QueueCard[] {
   const cards = state.order.flatMap((id) => {
     const card = state.cards.find((item) => item.id === id);
-    return card && (card.session || card.harness) && !card.detached && card.archivedAt === undefined && card.phase !== "working" ? [card] : [];
+    return card && (card.session || card.harness) && !card.detached && card.archivedAt === undefined
+      && card.remindAt === undefined && card.phase !== "working" ? [card] : [];
   });
   if (state.sortMode !== "score") return cards.sort((a,b) => Number(hasUrgentCall(b)) - Number(hasUrgentCall(a)));
   const tags = state.turnTagDefinitions ?? DEFAULT_TURN_TAGS;

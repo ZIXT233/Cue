@@ -25,8 +25,8 @@ import type { QueueWorkspace } from "../card-queue";
 import type { HarnessSession } from "./types";
 
 const exec = promisify(execFile);
-const globalRuntime = globalThis as typeof globalThis & { __topcardHarnessProbes?: Map<string, ProbeState> };
-const states = globalRuntime.__topcardHarnessProbes ??= new Map();
+const globalRuntime = globalThis as typeof globalThis & { __cueHarnessProbes?: Map<string, ProbeState> };
+const states = globalRuntime.__cueHarnessProbes ??= new Map();
 
 export async function launchHarness(kind: unknown, workspace: QueueWorkspace, resume?: HarnessSession): Promise<HarnessSession> {
   const adapter = getHarnessAdapter(kind);
@@ -81,13 +81,13 @@ export async function launchHarness(kind: unknown, workspace: QueueWorkspace, re
     if (adapter.id === "claude") {
       hooks.env = { ...hooks.env, ...claudeHarnessEnv(await readClaudeHarnessAuth()) };
     }
-    if (resume?.providerSessionId) hooks.env.TOPCARD_HARNESS_SESSION_ID = resume.providerSessionId;
+    if (resume?.providerSessionId) hooks.env.CUE_HARNESS_SESSION_ID = resume.providerSessionId;
     const launchArgs = [...commandPrefix, ...(resume ? adapter.resumeArgs(resume.providerSessionId!) : []), ...adapter.args, ...hooks.args];
     const command = [adapter.executable, ...launchArgs].map(shellQuote).join(" ");
     if (workspace.kind === "ssh") {
       executable = "ssh";
       const exports = Object.entries(hooks.env).map(([key, value]) => `${key}=${shellQuote(value)}`).join(" ");
-      args = [...await connectionArgs(workspace.sshHost!, { requestTty: true }), sshLoginCommand(`cd ${shellQuote(workspace.cwd)} && ${exports ? `export ${exports} && ` : ""}TOPCARD_HARNESS_TTY=$(tty) && export TOPCARD_HARNESS_TTY && exec ${command}`)];
+      args = [...await connectionArgs(workspace.sshHost!, { requestTty: true }), sshLoginCommand(`cd ${shellQuote(workspace.cwd)} && ${exports ? `export ${exports} && ` : ""}CUE_HARNESS_TTY=$(tty) && export CUE_HARNESS_TTY && exec ${command}`)];
     } else if (process.platform === "win32") {
       const launch = windowsCommand(commandPath, launchArgs);
       executable = launch.executable;
@@ -143,7 +143,7 @@ export async function launchHarness(kind: unknown, workspace: QueueWorkspace, re
   } catch (error) { states.delete(terminalId); throw error; }
   return { kind: adapter.id, shellCommandNotifications, terminalId, state: adapter.id === "shell" ? "attention" : "starting", version, remote: workspace.kind === "ssh", providerSessionId: resume?.providerSessionId, title: resume?.title ?? (adapter.id === "shell" ? workspace.name : undefined) };
 }
-const signalDir = (id: string) => join(process.env.TOPCARD_DATA_DIR || join(process.cwd(), ".topcard"), "harness-signals", id);
+const signalDir = (id: string) => join(process.env.CUE_DATA_DIR || join(process.cwd(), ".cue"), "harness-signals", id);
 export async function harnessSnapshot(session: HarnessSession): Promise<HarnessSession> {
   let current = states.get(session.terminalId);
   if (current) {

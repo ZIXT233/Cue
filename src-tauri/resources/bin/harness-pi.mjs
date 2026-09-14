@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-// Loaded only by a TopCard-owned Pi CLI. No tools, prompts or permission changes.
-export default function topcardState(pi) {
+// Loaded only by a Cue-owned Pi CLI. No tools, prompts or permission changes.
+export default function cueState(pi) {
   function emit(event, ctx, prompt) {
     try {
       const text = value => typeof value === 'string' ? value.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 160) : undefined;
@@ -11,11 +11,11 @@ export default function topcardState(pi) {
       const last = [...messages].reverse().find(message => message.role === 'assistant');
       const replyPreview = last ? text(typeof last.content === 'string' ? last.content : last.content.filter(block => block.type === 'text').map(block => block.text).join(' ')) : undefined;
       const signal = { replyPreview, at: Date.now(), event, sessionId: ctx.sessionManager.getSessionId(), title: text(ctx.sessionManager.getSessionName()), prompt: text(prompt) };
-      const token = process.env.TOPCARD_HARNESS_CHANNEL;
+      const token = process.env.CUE_HARNESS_CHANNEL;
       if (token) {
-        fs.writeFileSync('/dev/tty', `\x1b]777;topcard;${Buffer.from(JSON.stringify({ token, signal })).toString('base64')}\x07`);
-      } else if (process.env.TOPCARD_HARNESS_SIGNAL_DIR) {
-        const target = path.join(process.env.TOPCARD_HARNESS_SIGNAL_DIR, `${signal.at}-${randomUUID()}.json`);
+        fs.writeFileSync('/dev/tty', `\x1b]777;cue;${Buffer.from(JSON.stringify({ token, signal })).toString('base64')}\x07`);
+      } else if (process.env.CUE_HARNESS_SIGNAL_DIR) {
+        const target = path.join(process.env.CUE_HARNESS_SIGNAL_DIR, `${signal.at}-${randomUUID()}.json`);
         fs.writeFileSync(`${target}.tmp`, JSON.stringify(signal), { mode: 0o600 });
         fs.renameSync(`${target}.tmp`, target);
       }

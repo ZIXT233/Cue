@@ -91,7 +91,7 @@ export function HarnessCard({ card, active, inQueue = false, children, onAction,
     {!disconnected && harness.state !== "attention" && <span className="cq-harness-state" data-state={harness.state} title={probeDetail}>{labels[harness.state]}</span>}
     {developerProbes && <button type="button" className="cq-harness-debug" disabled={busy} onClick={() => setShowDebug(true)} title={t("harness.debugHint")}>{t("harness.debug")}</button>}
   </div> : null;
-  const terminal = harness ? <TerminalPanel key={`${harness.terminalId}:${connection}`} embedded remote={harness.remote} themeProfile={harness.kind === "grok" ? "grok" : undefined} readOnly={card.archivedAt !== undefined || harness.state === "exited" || harness.state === "error"} tab={{ id: harness.terminalId, cwd: card.cwd, restored: true }} active={active} focusReporting={harness.kind !== "shell"} inQueue={inQueue}
+  const terminal = harness ? <TerminalPanel key={`${harness.terminalId}:${connection}`} embedded remote={harness.remote} themeProfile={harness.kind === "grok" ? "grok" : undefined} conptyCursorHide={harness.kind !== "codex"} readOnly={card.archivedAt !== undefined || harness.state === "exited" || harness.state === "error"} tab={{ id: harness.terminalId, cwd: card.cwd, restored: true }} active={active} focusReporting={harness.kind !== "shell"} inQueue={inQueue}
     onOutput={harness.kind === "shell" && harness.shellCommandNotifications !== false ? data => shellProbe.current?.(data) : undefined} onStatusChange={setTerminalStatus} onRestart={() => void act(harness.providerSessionId ? "harness_resume" : "harness_reopen")} onClosed={() => {}} onCloseError={() => {}} /> : null;
 
   return <>

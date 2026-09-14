@@ -6,7 +6,9 @@ import { useCompletionNotifications } from "@/hooks/useCompletionNotifications";
 import { useAudio } from "@/hooks/useAudio";
 import { useTheme } from "@/hooks/useTheme";
 import { useAttentionMode } from "@/hooks/useAttentionMode";
+import { useSubmissionBehavior } from "@/hooks/useSubmissionBehavior";
 import { ATTENTION_MODES } from "@/lib/attention-mode";
+import { SUBMISSION_BEHAVIORS } from "@/lib/submission-behavior";
 import { announceQueueToast } from "@/lib/queue-toast";
 import { THEME_OPTIONS } from "@/lib/theme";
 import { ThemeIcon } from "./ThemeIcon";
@@ -55,6 +57,7 @@ function GeneralSettings() {
   const [audioBlocked, setAudioBlocked] = useState(false);
   const { preference, setThemePreference } = useTheme();
   const { mode: attentionMode, setMode: setAttentionMode } = useAttentionMode();
+  const { mode: submissionBehavior, setMode: setSubmissionBehavior } = useSubmissionBehavior();
   const { fontSize, setFontSize } = useChatAppearance();
   const [shellSettings, setShellSettings] = useState<ShellToolSettingsResponse | null>(null);
   const [shellSaving, setShellSaving] = useState(false);
@@ -144,11 +147,41 @@ function GeneralSettings() {
       </section>
 
       <section className="settings-general-section">
+        <h3 className="settings-general-heading">{t("settings.submissionBehavior")}</h3>
+        <div className="settings-attention-mode-copy">
+          <p className="settings-general-description">{t("settings.submissionKeepInViewDescription")}</p>
+          <p className="settings-general-description">{t("settings.submissionCollapseDescription")}</p>
+        </div>
+        <div role="radiogroup" aria-label={t("settings.submissionBehavior")} className="settings-theme-options settings-attention-mode-options">
+          {SUBMISSION_BEHAVIORS.map((option) => {
+            const selected = submissionBehavior === option.id;
+            return (
+              <label key={option.id} className="settings-theme-option">
+                <input
+                  type="radio"
+                  name="submission-behavior"
+                  value={option.id}
+                  checked={selected}
+                  onChange={() => setSubmissionBehavior(option.id)}
+                  className="sr-only"
+                />
+                <span className="settings-attention-mode-icon" aria-hidden="true">{option.icon}</span>
+                <span className="settings-theme-option-label">{t(option.label)}</span>
+              </label>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="settings-general-section">
         <h3 className="settings-general-heading">{t("settings.notifications")}</h3>
         <div className="settings-chat-options">
           <div className="settings-chat-option settings-chat-switch-option">
             <span>{t("settings.completionNotifications")}</span>
-            <ConfigSwitch checked={notifications.enabled} label={t("settings.completionNotifications")} onChange={() => void notifications.toggle()} />
+            <div className="settings-chat-option-actions">
+              <ConfigButton variant="ghost" size="small" onClick={() => { void notifications.sendTestNotification(); }}>{t("settings.sendTestNotification")}</ConfigButton>
+              <ConfigSwitch checked={notifications.enabled} label={t("settings.completionNotifications")} onChange={() => void notifications.toggle()} />
+            </div>
           </div>
           <p className="settings-general-description">{t("settings.completionNotificationsDescription")}</p>
           {notifications.status && <p role="status" className="settings-general-error">{notifications.status}</p>}

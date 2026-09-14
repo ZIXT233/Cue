@@ -5,6 +5,7 @@ export interface XtermProbe {
   bytesWritten: number;
   lastOffset?: number;
   lastReset?: boolean;
+  gaps?: number;
   status: string;
   at: number;
 }

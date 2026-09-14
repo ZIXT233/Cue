@@ -16,7 +16,10 @@ const MAX_BACKLOG: usize = 128 * 1024;
 #[derive(Clone, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum TerminalEvent {
-    Output { data: String, offset: u64, #[serde(skip_serializing_if = "Option::is_none")] reset: Option<bool> },
+    /// `from` is the byte offset where `data` starts, `offset` where it ends.
+    /// Clients use `from` to detect gaps in the stream and resync instead of
+    /// rendering a hole as terminal garbage.
+    Output { data: String, from: u64, offset: u64, #[serde(skip_serializing_if = "Option::is_none")] reset: Option<bool> },
     Exit { #[serde(rename = "exitCode")] exit_code: i32 },
     Closed,
 }
@@ -197,6 +200,7 @@ impl TerminalHub {
                             let mut map = inner.lock().unwrap_or_else(|error| error.into_inner());
                             map.get_mut(&id_out).map(|record| {
                                 record.backlog.push_str(&data);
+                                let from = record.offset;
                                 record.offset += data.len() as u64;
                                 trim_backlog(&mut record.backlog);
                                 if record.persistent {
@@ -204,7 +208,7 @@ impl TerminalHub {
                                 }
                                 #[cfg(debug_assertions)]
                                 let before = record.listeners_tx.len();
-                                emit(record, TerminalEvent::Output { data: data.clone(), offset: record.offset, reset: None });
+                                emit(record, TerminalEvent::Output { data: data.clone(), from, offset: record.offset, reset: None });
                                 #[cfg(debug_assertions)]
                                 if crate::dev_tools::probes_enabled() {
                                     let mut probe = record.probe.lock().unwrap_or_else(|error| error.into_inner());
@@ -433,18 +437,18 @@ impl TerminalHub {
             record.last_listener = Instant::now();
             let start = record.offset.saturating_sub(record.backlog.len() as u64);
             let reset = after.is_none() || after.is_some_and(|cursor| cursor < start || cursor > record.offset);
-            let data = if reset {
-                record.backlog.clone()
+            let (data, from) = if reset {
+                (record.backlog.clone(), start)
             } else {
                 let skip = after.unwrap_or(start).saturating_sub(start) as usize;
-                let mut from = skip.min(record.backlog.len());
-                while from < record.backlog.len() && !record.backlog.is_char_boundary(from) {
-                    from += 1;
+                let mut index = skip.min(record.backlog.len());
+                while index < record.backlog.len() && !record.backlog.is_char_boundary(index) {
+                    index += 1;
                 }
-                record.backlog[from..].to_string()
+                (record.backlog[index..].to_string(), start + index as u64)
             };
             return Some((
-                TerminalEvent::Output { data, offset: record.offset, reset: Some(reset) },
+                TerminalEvent::Output { data, from, offset: record.offset, reset: Some(reset) },
                 rx,
                 record.exited,
                 record.exit_code,
@@ -456,6 +460,7 @@ impl TerminalHub {
         Some((
             TerminalEvent::Output {
                 data: saved.output.clone(),
+                from: 0,
                 offset: saved.output.len() as u64,
                 reset: Some(true),
             },

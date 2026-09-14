@@ -1,13 +1,13 @@
 import type { HarnessState } from "./types.ts";
 
-/** Environment variables injected into a TopCard terminal for the shared hook API. */
+/** Environment variables injected into a Cue terminal for the shared hook API. */
 export const HOOK_ENV = {
-  SIGNAL_DIR: "TOPCARD_HARNESS_SIGNAL_DIR",
-  CHANNEL: "TOPCARD_HARNESS_CHANNEL",
-  TTY: "TOPCARD_HARNESS_TTY",
-  KIND: "TOPCARD_HARNESS_KIND",
-  SESSION_ID: "TOPCARD_HARNESS_SESSION_ID",
-  HOOK: "TOPCARD_HOOK",
+  SIGNAL_DIR: "CUE_HARNESS_SIGNAL_DIR",
+  CHANNEL: "CUE_HARNESS_CHANNEL",
+  TTY: "CUE_HARNESS_TTY",
+  KIND: "CUE_HARNESS_KIND",
+  SESSION_ID: "CUE_HARNESS_SESSION_ID",
+  HOOK: "CUE_HOOK",
 } as const;
 
 /**

@@ -104,6 +104,30 @@ pub fn reconcile(state: &mut CardQueue) {
             card.turn_tags = None;
             card.tag_evaluation = None;
             card.urgent_call = None;
+            card.remind_at = None;
+        } else if let Some(remind_at) = card.remind_at {
+            if remind_at <= now {
+                // The reminder expired: wake the card up and re-enter the queue
+                // at the position implied by the active sort mode. In score mode
+                // the Wait clock restarts so the card competes by its fresh score.
+                card.remind_at = None;
+                if state.sort_mode.as_deref() == Some("score") {
+                    card.waiting_since = Some(now);
+                }
+                let id = card.id.clone();
+                if !state.order.contains(&id) {
+                    card.ready_at.get_or_insert(now);
+                    if state.insertion_position.as_deref() == Some("top") {
+                        state.order.insert(0, id);
+                    } else {
+                        state.order.push(id);
+                    }
+                }
+            } else {
+                // Still parked: a remind card never sits in the queue order.
+                let id = card.id.clone();
+                state.order.retain(|item| item != &id);
+            }
         } else if !state.order.contains(&card.id) {
             card.ready_at.get_or_insert(now);
             if state.insertion_position.as_deref() == Some("top") {
@@ -157,19 +181,38 @@ pub fn archive_card(state: &mut CardQueue, id: &str) -> AppResult<()> {
     Ok(())
 }
 
-pub fn defer_card(state: &mut CardQueue, id: &str) {
-    let Some(card) = state.cards.iter().find(|c| c.id == id) else { return };
+/// Put a queue card into the "remind me later" parking list until `remind_at`.
+pub fn park_remind(state: &mut CardQueue, id: &str, remind_at: i64) -> bool {
+    let Some(card) = state.cards.iter_mut().find(|c| c.id == id) else { return false };
     if (card.session.is_none() && card.harness.is_none()) || matches!(card.phase, CardPhase::Working) || card.archived_at.is_some() {
-        return;
+        return false;
     }
-    let index = state.order.iter().position(|item| item == id);
-    let Some(index) = index else { return };
-    let next = state.order.iter().enumerate().find(|(pos, other)| {
-        *pos > index && state.cards.iter().any(|c| c.id == **other && c.detached.is_none())
-    }).map(|(pos, _)| pos);
-    let Some(next) = next else { return };
-    state.order.swap(index, next);
+    card.remind_at = Some(remind_at);
+    state.order.retain(|item| item != id);
     pin_draft(state);
+    true
+}
+
+/// Wake a remind-later card and re-enter it into the queue at the position
+/// implied by the active sort mode: score mode restarts the Wait clock so the
+/// card competes by its fresh score; FIFO re-inserts at the insertion edge.
+pub fn release_remind(state: &mut CardQueue, id: &str) -> bool {
+    let Some(card) = state.cards.iter_mut().find(|c| c.id == id) else { return false };
+    if card.remind_at.is_none() { return false; }
+    card.remind_at = None;
+    if state.sort_mode.as_deref() == Some("score") {
+        card.waiting_since = Some(now_ms());
+    }
+    card.ready_at.get_or_insert(now_ms());
+    if !state.order.iter().any(|item| item == id) {
+        if state.insertion_position.as_deref() == Some("top") {
+            state.order.insert(0, id.to_string());
+        } else {
+            state.order.push(id.to_string());
+        }
+    }
+    pin_draft(state);
+    true
 }
 
 pub fn select_workspace_for_draft(state: &mut CardQueue, workspace: &QueueWorkspace) {
@@ -199,6 +242,7 @@ pub fn select_workspace_for_draft(state: &mut CardQueue, workspace: &QueueWorksp
         tag_evaluation: None,
         tag_history: None,
         archived_at: None,
+        remind_at: None,
         detached: None,
         side_terminals: None,
         side_terminal_open: None,

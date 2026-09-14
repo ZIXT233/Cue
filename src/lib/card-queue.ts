@@ -28,6 +28,8 @@ export interface QueueCard {
   tagEvaluation?: { status: "pending" | "done" | "error"; error?: string; startedAt: number; definitions: import("./turn-priority").TurnTag[]; result?: unknown };
   tagHistory?: { turnKey: string; evaluatedAt: number; definitions: import("./turn-priority").TurnTag[]; result?: unknown; error?: string }[];
   archivedAt?: number;
+  /** Unix ms deadline while the card is parked in "remind me later". */
+  remindAt?: number;
   detached?: { owner: string; expiresAt: number };
   sideTerminals?: { id: string; cwd: string }[];
   sideTerminalOpen?: boolean;
@@ -66,7 +68,19 @@ export function reconcileQueue(state: CardQueue, running: Set<string>, attention
     if (phase === "working") {
       next.order = next.order.filter((id) => id !== card.id);
       delete card.readyAt; delete card.waitingSince; delete card.turnKey;
-      delete card.turnTags; delete card.tagEvaluation; delete card.urgentCall;
+      delete card.turnTags; delete card.tagEvaluation; delete card.urgentCall; delete card.remindAt;
+    }
+    else if (card.remindAt !== undefined) {
+      if (card.remindAt <= now) {
+        // Expired reminder: re-enter the queue at the sort-mode position.
+        delete card.remindAt;
+        if (next.sortMode === "score") card.waitingSince = now;
+        card.readyAt ??= now;
+        if (!next.order.includes(card.id)) {
+          if (next.insertionPosition === "top") next.order.unshift(card.id);
+          else next.order.push(card.id);
+        }
+      } else next.order = next.order.filter((id) => id !== card.id);
     }
     else if (!next.order.includes(card.id)) {
       card.readyAt ??= now;
@@ -122,12 +136,27 @@ export function filterHistoricalSessions(sessions: SessionInfo[], cards: QueueCa
     && `${session.name} ${session.firstMessage} ${session.cwd}`.toLowerCase().includes(search));
 }
 
-export function deferCard(state: CardQueue, id: string): void {
+/** Put a queue card into the "remind me later" parking list until remindAt. */
+export function parkRemind(state: CardQueue, id: string, remindAt: number): void {
   const card = state.cards.find((item) => item.id === id);
   if (!card || (!card.session && !card.harness) || card.phase === "working" || card.archivedAt !== undefined) return;
-  const index = state.order.indexOf(id);
-  const next = state.order.findIndex((otherId, position) => position > index && state.cards.some((other) => other.id === otherId && !other.detached));
-  if (index < 0 || next < 0) return;
-  [state.order[index], state.order[next]] = [state.order[next], state.order[index]];
+  card.remindAt = remindAt;
+  state.order = state.order.filter((item) => item !== id);
+  pinDraft(state);
+}
+
+/** Wake a remind-later card and re-enter it at the position implied by the
+ * active sort mode: score mode restarts the Wait clock; FIFO re-inserts at
+ * the insertion edge. */
+export function releaseRemind(state: CardQueue, id: string, now = Date.now()): void {
+  const card = state.cards.find((item) => item.id === id);
+  if (!card || card.remindAt === undefined) return;
+  card.remindAt = undefined;
+  if (state.sortMode === "score") card.waitingSince = now;
+  card.readyAt ??= now;
+  if (!state.order.includes(id)) {
+    if (state.insertionPosition === "top") state.order.unshift(id);
+    else state.order.push(id);
+  }
   pinDraft(state);
 }

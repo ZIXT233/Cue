@@ -13,7 +13,7 @@ import { PriorityBadge } from "./PriorityBadge";
 import { tagColor } from "@/lib/tag-color";
 import { THEME_OPTIONS } from "@/lib/theme";
 import { DEFAULT_TURN_TAGS, scoreCard, sortedQueue, resolveQueueFocus } from "@/lib/turn-priority";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -40,6 +40,7 @@ import { CardSideTerminal, CardWorkspace, SideTerminalButton } from "./CardSideT
 import { DetachedCardTools, type DetachedCardLayoutControls } from "./DetachedCardTools";
 import { useAudio } from "@/hooks/useAudio";
 import { useAttentionMode } from "@/hooks/useAttentionMode";
+import { useSubmissionBehavior } from "@/hooks/useSubmissionBehavior";
 import { ATTENTION_MODES, shouldQuietRearQueueArrival, type AttentionMode } from "@/lib/attention-mode";
 import { QUEUE_TOAST_EVENT } from "@/lib/queue-toast";
 import { latestAssistantReply, queueArrivalSide } from "@/lib/queue-arrival";
@@ -53,7 +54,22 @@ import type { RemoteHost } from "@/lib/remote-hosts";
 import type { SessionInfo } from "@/lib/types";
 
 const cardTitle = (card: QueueCard, workspaceName: string | undefined, fallback: string) => harnessCardTitle(card.harness, workspaceName, fallback);
-const URGENT_ALERTS_KEY = "topcard:urgent-alerts";
+const URGENT_ALERTS_KEY = "cue:urgent-alerts";
+const REMIND_OPTIONS = [
+  { minutes: 15, labelKey: "queue.15分钟" },
+  { minutes: 60, labelKey: "queue.1小时" },
+  { minutes: 180, labelKey: "queue.3小时" },
+  { minutes: 480, labelKey: "queue.8小时" },
+  { minutes: 1440, labelKey: "queue.24小时" },
+] as const;
+/** Compact language-neutral countdown, e.g. "12m", "3h 05m", "1d 6h". */
+const formatRemainder = (ms: number) => {
+  const minutes = Math.max(0, Math.ceil(ms / 60_000));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ${String(minutes % 60).padStart(2, "0")}m`;
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+};
 const cardTurnKey = (card: QueueCard) => JSON.stringify([
   card.id,
   card.turnKey ?? ["legacy", card.session?.modified, card.session?.messageCount, card.readyAt],
@@ -112,9 +128,10 @@ export function CardQueueShell() {
   const detachedId = params.get("card");
   const requestedSessionId = params.get("session");
   const requestedAttentionId = params.get("attention");
-  const { queue, defaultCwd, error: connectionError, refresh, act, markWorking, rollbackWorking } = useCardQueue();
+  const { queue, defaultCwd, error: connectionError, refresh, act } = useCardQueue();
   const notifications = useCompletionNotifications(queue);
   const { mode: attentionMode, setMode: setAttentionMode } = useAttentionMode();
+  const { mode: submissionBehavior } = useSubmissionBehavior();
   const { soundEnabled, onSoundToggle, unlockAudio, playDoneSound, playQueueArrivalSound } = useAudio();
   const audio = useMemo(() => ({ soundEnabled, onSoundToggle, playDoneSound, unlockAudio }), [soundEnabled, onSoundToggle, playDoneSound, unlockAudio]);
   const previousSoundCards = useRef<QueueCard[] | null>(null);
@@ -123,6 +140,15 @@ export function CardQueueShell() {
   const attentionOption = ATTENTION_MODES.find((option) => option.id === attentionMode) ?? ATTENTION_MODES[0];
   useViewportHeight();
   const [inspecting, setInspecting] = useState<string | null>(null);
+  // Keep-in-view mode: a card that just joined the Working list stays on screen here.
+  const [watching, setWatching] = useState<string | null>(null);
+  const watchingRef = useRef<string | null>(null);
+  watchingRef.current = watching;
+  // Every path that leaves the inspected card (Esc, backdrop click, deck
+  // navigation, notification focus, archive, pop-out) also ends keep-in-view mode.
+  useEffect(() => {
+    if (watching !== null && inspecting !== watching) setWatching(null);
+  }, [inspecting, watching]);
   const stageRef = useRef<HTMLDivElement>(null);
   const [creating, setCreating] = useState(false);
   const [addingWorkspace, setAddingWorkspace] = useState(false);
@@ -139,12 +165,10 @@ export function CardQueueShell() {
   const [archiveConfirm, setArchiveConfirm] = useState<QueueCard | null>(null);
   const [skipArchiveConfirmation, setSkipArchiveConfirmation] = useState(false);
   const [skipArchiveChecked, setSkipArchiveChecked] = useState(false);
-  const [deferConfirm, setDeferConfirm] = useState<QueueCard | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [deckReset, setDeckReset] = useState(0);
   const deckNavigationRef = useRef<((direction: number) => void) | null>(null);
-  const submissionTransferFrames = useRef(new Map<string, number>());
   const [claimOwner, setClaimOwner] = useState<string | null>(null);
   const [claimError, setClaimError] = useState("");
   const [pendingDetach, setPendingDetach] = useState<Set<string>>(() => new Set());
@@ -189,8 +213,8 @@ export function CardQueueShell() {
     const controller = new AbortController();
     void refreshRemoteHosts(controller.signal);
     const refresh = () => void refreshRemoteHosts();
-    window.addEventListener("topcard-remote-hosts-changed", refresh);
-    return () => { controller.abort(); window.removeEventListener("topcard-remote-hosts-changed", refresh); };
+    window.addEventListener("cue-remote-hosts-changed", refresh);
+    return () => { controller.abort(); window.removeEventListener("cue-remote-hosts-changed", refresh); };
   }, [refreshRemoteHosts]);
   const cards = queue?.cards ?? [];
   useEffect(() => {
@@ -222,6 +246,15 @@ export function CardQueueShell() {
   const working = cards.filter((card) => card.phase === "working" && !card.detached && !pendingDetach.has(card.id) && !card.harness?.setup);
   const archived = cards.filter((card) => card.archivedAt !== undefined).sort((a, b) => b.archivedAt! - a.archivedAt!);
   const detached = cards.filter((card) => card.detached || pendingDetach.has(card.id));
+  const reminding = cards.filter((card) => card.remindAt !== undefined && card.archivedAt === undefined).sort((a, b) => (a.remindAt ?? 0) - (b.remindAt ?? 0));
+  const remindCount = reminding.length;
+  const [remindNow, setRemindNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!remindCount) return;
+    setRemindNow(Date.now());
+    const timer = window.setInterval(() => setRemindNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, [remindCount]);
   const scoreTick = useQueueScoreClock(queue);
   useEffect(() => {
     setPendingDetach((current) => {
@@ -302,6 +335,58 @@ export function CardQueueShell() {
       location,
     };
   });
+  // Toolbar vs search box: measure the toolbar's real expanded width (labels
+  // forced on) instead of guessing a breakpoint. Priority: keep labels visible
+  // and let the centered search box yield width; collapse to icons only when
+  // yielding would squeeze the search below a usable minimum.
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
+  const [toolbarCompact, setToolbarCompact] = useState(false);
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    const toolbar = toolbarRef.current;
+    if (!content || !toolbar) return;
+    const MIN_SEARCH = 240;
+    const GAP = 12;
+    const update = () => {
+      const search = content.querySelector<HTMLElement>(".cq-card-search");
+      // Measure with labels forced on: the compact state shrinks the toolbar
+      // and hides exactly the text we need to account for. Both the class add
+      // and remove happen in this task, so nothing paints in between.
+      toolbar.classList.add("cq-toolbar-expanded");
+      const expanded = toolbar.offsetWidth;
+      toolbar.classList.remove("cq-toolbar-expanded");
+      const width = content.clientWidth;
+      // The toolbar is offset from the content edge (left:16px, 14px ≤700px);
+      // clearance is measured from its right edge, not the content edge.
+      const toolbarLeft = toolbar.offsetLeft;
+      const clearance = toolbarLeft + expanded + GAP;
+      // Decide from stable quantities only (content width + measured expanded
+      // width), never from the search box's current width — reading the
+      // yielded width made the clear/yield decisions self-referential and let
+      // them deadlock in the overlapped state.
+      const baseWidth = Math.min(460, width - 360); // search box with no reservation
+      const baseLeft = (width - baseWidth) / 2;
+      const yielded = Math.min(460, width - 2 * clearance);
+      const compact = !search || yielded < MIN_SEARCH;
+      if (compact) {
+        content.style.removeProperty("--cq-search-width");
+        setToolbarCompact(true);
+        return;
+      }
+      if (clearance <= baseLeft) content.style.removeProperty("--cq-search-width");
+      else content.style.setProperty("--cq-search-width", `${yielded}px`);
+      setToolbarCompact(false);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(content);
+    observer.observe(toolbar);
+    return () => {
+      observer.disconnect();
+      content.style.removeProperty("--cq-search-width");
+    };
+  }, [detachedId, cardSearchItems.length, t]);
   const tags = queue?.turnTagDefinitions ?? DEFAULT_TURN_TAGS;
   const inspected = cards.find((card) => card.id === inspecting && !card.detached && !pendingDetach.has(card.id));
   const active = detachedId ? cards.find((card) => card.id === detachedId) : inspected || ready[Math.min(deckIndex, Math.max(0, ready.length - 1))];
@@ -321,6 +406,25 @@ export function CardQueueShell() {
   }, [active, deckIndex, inspecting, detachedId]); // Keep the next reader stable after explicit actions.
 
   const priorHarnessPhases = useRef(new Map<string, string>());
+  // Keep-in-view mode: the moment a queue snapshot flips the focused (or
+  // already inspected) card to "working", take it over in this same render —
+  // a render-phase update re-renders before commit, so CardTransfers never
+  // sees an attention -> working zone change: no flight, no unmount. The card
+  // joins the Working list while staying exactly where it is on screen.
+  if (submissionBehavior === "keep-in-view" && !detachedId && queue) {
+    for (const card of cards) {
+      if (card.phase !== "working" || card.detached || pendingDetach.has(card.id)) continue;
+      const prior = priorHarnessPhases.current.get(card.id);
+      if (prior === undefined || prior === "working") continue;
+      if (inspecting === card.id) {
+        if (watchingRef.current !== card.id) setWatching(card.id);
+      } else if (inspecting === null && card.id === focus?.id) {
+        setInspecting(card.id);
+        setWatching(card.id);
+      }
+      break;
+    }
+  }
   useEffect(() => {
     if (!queue) return;
     for (const card of queue.cards) {
@@ -334,7 +438,9 @@ export function CardQueueShell() {
               body: JSON.stringify({ type: "input", data: "\x1b[O" }),
             }).catch(() => {});
           }
-          setInspecting(current => current === card.id ? null : current);
+          // Keep-in-view mode keeps the card on screen while it joins the Working
+          // list; the phase -> working effect skips clearing inspecting for it.
+          if (watchingRef.current !== card.id) setInspecting(current => current === card.id ? null : current);
         } else if (previous === "working" && !card.detached && card.harness.kind !== "shell") {
           void terminalRequest(`/api/terminal/${encodeURIComponent(card.harness.terminalId)}`, {
             method: "POST",
@@ -346,6 +452,33 @@ export function CardQueueShell() {
     }
     priorHarnessPhases.current = new Map(queue.cards.map(card => [card.id, card.phase]));
   }, [queue]);
+
+  // Stage sizing: prefer a 10:9 (height:width) card — width follows the
+  // flex-determined stage height when the content area is wide enough to keep
+  // side margins — but never narrower than 50% of the content area (which
+  // also caps it at the full content width on narrow windows). Detached
+  // windows stay fluid.
+  const [stageWidth, setStageWidth] = useState<number | null>(null);
+  useEffect(() => {
+    if (detachedId) { setStageWidth(null); return; }
+    const stage = stageRef.current;
+    const main = stage?.parentElement;
+    if (!stage || !main) return;
+    const measure = () => {
+      const mainStyle = getComputedStyle(main);
+      const inner = main.clientWidth - parseFloat(mainStyle.paddingLeft) - parseFloat(mainStyle.paddingRight);
+      const height = stage.getBoundingClientRect().height;
+      if (!(inner > 0) || !(height > 0)) return;
+      const width = Math.round(Math.max(inner * 0.5, Math.min(height * 0.9, inner)));
+      setStageWidth(current => current === width ? current : width);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(stage);
+    observer.observe(main);
+    window.addEventListener("resize", measure);
+    return () => { observer.disconnect(); window.removeEventListener("resize", measure); };
+  }, [detachedId]);
 
   const resolvedAttention = useRef<string | null>(null);
   const focusNotificationCard = useCallback((id: string) => {
@@ -386,33 +519,6 @@ export function CardQueueShell() {
     setFocus(next ? { id: next.id, index: ready.indexOf(next) } : null);
     setDeckReset((key) => key + 1);
   }, [ready]);
-  const onWorking = useCallback((cardId: string) => {
-    finishCard(cardId);
-    markWorking(cardId);
-  }, [finishCard, markWorking]);
-  const onSubmitted = useCallback((cardId: string) => {
-    // Keep the expanded source mounted for one committed frame. CardTransfers
-    // can then snapshot the same attention -> working flight used by queued cards.
-    markWorking(cardId, undefined, true);
-    const previousFrame = submissionTransferFrames.current.get(cardId);
-    if (previousFrame !== undefined) cancelAnimationFrame(previousFrame);
-    const frame = requestAnimationFrame(() => {
-      submissionTransferFrames.current.delete(cardId);
-      finishCard(cardId);
-    });
-    submissionTransferFrames.current.set(cardId, frame);
-  }, [finishCard, markWorking]);
-  const onRejected = useCallback((cardId: string) => {
-    const frame = submissionTransferFrames.current.get(cardId);
-    if (frame !== undefined) cancelAnimationFrame(frame);
-    submissionTransferFrames.current.delete(cardId);
-    rollbackWorking(cardId);
-    setInspecting(cardId);
-  }, [rollbackWorking]);
-  useEffect(() => () => {
-    for (const frame of submissionTransferFrames.current.values()) cancelAnimationFrame(frame);
-    submissionTransferFrames.current.clear();
-  }, []);
 
   const canShowDetached = !detachedId || (claimOwner && active?.detached?.owner === claimOwner);
   useEffect(() => {
@@ -533,7 +639,7 @@ export function CardQueueShell() {
 
   useEffect(() => {
     if (!detachedId) return;
-    const desktopOwner = (window as Window & { topcardDesktop?: { owner?: string } }).topcardDesktop?.owner;
+    const desktopOwner = (window as Window & { cueDesktop?: { owner?: string } }).cueDesktop?.owner;
     const owner = ownerRef.current ??= desktopOwner || crypto.randomUUID();
     const generation = ++leaseGeneration.current;
     const stillCurrent = () => leaseGeneration.current === generation;
@@ -630,22 +736,22 @@ export function CardQueueShell() {
       if (typeof url === "string") openFromNotification(url);
     };
     if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", onServiceWorkerMessage);
-    window.addEventListener("topcard:notification-click", onDesktopNotification);
+    window.addEventListener("cue:notification-click", onDesktopNotification);
     return () => {
       if ("serviceWorker" in navigator) navigator.serviceWorker.removeEventListener("message", onServiceWorkerMessage);
-      window.removeEventListener("topcard:notification-click", onDesktopNotification);
+      window.removeEventListener("cue:notification-click", onDesktopNotification);
     };
   }, [detachedId, onAdopt, focusNotificationCard]);
-  const shift = useCallback(async (card = active) => {
-    if (!card || detachedId || ready.length < 2 || inspecting) return false;
-    const result = await run(queue?.sortMode === "score" ? "reset_wait" : "back", { id: card.id });
-    if (result) advanceToNextCard(card.id);
+  const remindLater = useCallback(async (card: QueueCard, minutes: number) => {
+    if (detachedId) return;
+    const result = await run("remind_later", { id: card.id, minutes });
+    if (result) showQueueToast(t("queue.已设置稍后提醒", { title: titleOf(card) }));
+  }, [detachedId, run, showQueueToast, t, titleOf]);
+  const remindBack = useCallback(async (card: QueueCard) => {
+    const result = await run("remind_back", { id: card.id });
+    if (result) setInspecting(current => current === card.id ? null : current);
     return !!result;
-  }, [active, detachedId, ready.length, inspecting, run, queue?.sortMode, advanceToNextCard]);
-  const requestShift = useCallback((card = active) => {
-    if (!card || detachedId || ready.length < 2 || inspecting) return;
-    setDeferConfirm(card);
-  }, [active, detachedId, ready.length, inspecting]);
+  }, [run]);
 
   const showNew = useCallback(() => {
     setCreating(true);
@@ -655,7 +761,7 @@ export function CardQueueShell() {
       if (event.isComposing || settings || creating || history || detachedId) return;
       if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
         if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey
-          || inspecting || addingWorkspace || file || archiveConfirm || deferConfirm || urgentCard) return;
+          || inspecting || addingWorkspace || file || archiveConfirm || urgentCard) return;
         const target = event.target instanceof Element ? event.target : null;
         if (target?.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"],[role="slider"],[role="spinbutton"],[role="combobox"],[role="menu"],[role="tablist"],[role="dialog"],dialog,summary')) return;
         if (!ready.length) return;
@@ -670,7 +776,7 @@ export function CardQueueShell() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [settings, creating, history, detachedId, inspecting, addingWorkspace, file, archiveConfirm, deferConfirm, urgentCard, ready]);
+  }, [settings, creating, history, detachedId, inspecting, addingWorkspace, file, archiveConfirm, urgentCard, ready]);
 
   const openHistory = async () => {
     setHistory([]);
@@ -713,7 +819,7 @@ export function CardQueueShell() {
     const remoteHost = remoteHostOf(workspace);
     const remoteAddress = remoteHost ? `${remoteHost.user ? `${remoteHost.user}@` : ""}${remoteHost.hostname}${remoteHost.port && remoteHost.port !== 22 ? `:${remoteHost.port}` : ""}` : hostLabel;
     const showScore = !!(visibleCard.session || visibleCard.harness) && queue?.sortMode === "score" && visibleCard.phase === "attention";
-    const showHeaderMeta = showScore || visibleCard.phase !== "attention" || hasUrgentCall(visibleCard) || !(visibleCard.session || visibleCard.harness);
+    const showHeaderMeta = showScore || visibleCard.phase !== "attention" || hasUrgentCall(visibleCard) || visibleCard.remindAt !== undefined || !(visibleCard.session || visibleCard.harness);
     const harness = (
               <HarnessCard key={`${visibleCard.id}:${visibleCard.workspaceId}`} card={visibleCard} active={isFront} inQueue={!detachedId && !visibleCard.detached && visibleCard.phase !== "working"} onStartAll={startable.length > 1 ? startAllHarnesses : undefined} onAction={async (action, data) => {
                 const result = await act(action, data);
@@ -728,7 +834,7 @@ export function CardQueueShell() {
     <CardSideTerminal key={visibleCard.id} cardId={visibleCard.id} cwd={visibleCard.cwd} remote={workspace?.kind === "ssh"} active={isFront} enabled={!layout} saved={visibleCard.sideTerminals} savedOpen={visibleCard.sideTerminalOpen}>
       {({ button: sideButton, panel: sidePanel }) => (
     <article aria-hidden={!isFront} inert={!isFront} className="cq-large-card cq-continuous-card" data-transfer-id={visibleCard.id} data-transfer-zone="attention" data-card-id={visibleCard.id} data-phase={visibleCard.phase} data-working-view={visibleCard.phase === "working"} data-urgent-call={hasUrgentCall(visibleCard)}>
-              <div className="cq-card-header">{detachedId && <div className="cq-detached-drag" data-tauri-drag-region aria-hidden="true" />}{layout?.leftToggle}<div className="cq-card-identity">{showHeaderMeta && <div className="cq-card-meta">{visibleCard.phase !== "attention" && <div className="cq-card-state"><i className={visibleCard.phase === "working" ? "cq-dot" : "cq-ready-dot"} />{visibleCard.phase === "draft" ? t("queue.新的思路") : t("queue.WORKING")}</div>}{hasUrgentCall(visibleCard) && <span className="cq-urgent-label" title={t("queue.urgentPriority")}>🚨 Urgent Call</span>}{!(visibleCard.session || visibleCard.harness) && <PriorityBadge weight={visibleCard.priorityWeight ?? 0} enabled={isFront} onSave={weight => run("priority_weight", {id:visibleCard.id,weight})} />}{showScore && <div className="cq-score-row">
+              <div className="cq-card-header">{detachedId && <div className="cq-detached-drag" data-tauri-drag-region aria-hidden="true" />}{layout?.leftToggle}<div className="cq-card-identity">{showHeaderMeta && <div className="cq-card-meta">{visibleCard.phase !== "attention" && <div className="cq-card-state"><i className={visibleCard.phase === "working" ? "cq-dot" : "cq-ready-dot"} />{visibleCard.phase === "draft" ? t("queue.新的思路") : t("queue.WORKING")}</div>}{hasUrgentCall(visibleCard) && <span className="cq-urgent-label" title={t("queue.urgentPriority")}>🚨 Urgent Call</span>}{visibleCard.remindAt !== undefined && <span className="cq-remind-label" title={t("queue.稍后提醒")}>⏰ {t("queue.稍后提醒")} · {formatRemainder((visibleCard.remindAt ?? 0) - remindNow)}</span>}{!(visibleCard.session || visibleCard.harness) && <PriorityBadge weight={visibleCard.priorityWeight ?? 0} enabled={isFront} onSave={weight => run("priority_weight", {id:visibleCard.id,weight})} />}{showScore && <div className="cq-score-row">
                 <span className="cq-score"><span aria-hidden="true">🧮</span> {t("queue.Score")} {hasUrgentCall(visibleCard) ? "∞" : cardScore.total}</span>
                 <span className="cq-score-formula" tabIndex={0}>
                   <span className="cq-score-operator">=</span>
@@ -738,10 +844,16 @@ export function CardQueueShell() {
                 </span>
               </div>}<div className="cq-meta-harness" /></div>}<div className="cq-card-title-row"><div className="cq-title-primary"><h2>{titleOf(visibleCard)}</h2>{workspace?.kind === "ssh" ? <ScoreChipTooltip text={<div className="cq-environment-tooltip"><span><WorkspaceMachineIcon name="remote" size={14} />{hostLabel}</span><small>{remoteAddress}</small></div>}><span className="cq-title-environment cq-title-host" aria-label={hostWithHarness}><WorkspaceMachineIcon name="remote" size={15} /><b title={hostWithHarness}>{hostWithHarness}</b></span></ScoreChipTooltip> : <span className="cq-title-environment cq-title-host" aria-label={hostWithHarness}><WorkspaceMachineIcon name="local" size={15} /><b title={hostWithHarness}>{hostWithHarness}</b></span>}<ScoreChipTooltip text={<div className="cq-environment-tooltip"><span><WorkspaceMachineIcon name="folder" size={14} />{workspaceLabel}</span><small>{workspace?.cwd || visibleCard.cwd}</small></div>}><span className="cq-title-environment cq-title-workspace" aria-label={workspaceLabel}><WorkspaceMachineIcon name="folder" size={15} /><b>{workspaceLabel}</b></span></ScoreChipTooltip></div><div className="cq-title-controls"><div className="cq-title-harness" /><div className="cq-title-branches" /><div className="cq-title-tools">{layout ? <SideTerminalButton disabled={workspace?.kind === "ssh"} pressed={layout.terminalOpen} label={workspace?.kind === "ssh" ? t("queue.remoteToolsUnavailable") : t("queue.sideTerminal")} onClick={layout.toggleTerminal} /> : sideButton}</div></div></div></div>
                 <div className="cq-card-actions">
-                  {!detachedId && <>
-                    {!inspecting && <button className="cq-action-defer" onClick={() => requestShift(visibleCard)} disabled={!(visibleCard.session || visibleCard.harness) || (queue?.sortMode !== "score" && ready.at(-1)?.id === visibleCard.id)} aria-label={queue?.sortMode === "score" ? t("queue.清零等待分") : t("queue.稍后")}><Icon name="down" />{queue?.sortMode === "score" && <small>−{cardScore.waiting}</small>}<span className="cq-action-tooltip" role="tooltip">{queue?.sortMode === "score" ? t("queue.扣除当前 Wait，重新计时") : t("queue.稍后")}</span></button>}
-                    {(!!visibleCard.session || !!visibleCard.harness) && <button className="cq-action-popout" onClick={popout} aria-label={t("queue.移出")}><Icon name="maximize" /><span className="cq-action-tooltip" role="tooltip">{t("queue.移出")}</span></button>}
-                    {(visibleCard.harness ? visibleCard.archivedAt === undefined : !inspecting && visibleCard.phase !== "working") && <button className="cq-action-archive" aria-label={(visibleCard.session || visibleCard.harness) ? t("queue.归档") : t("queue.关闭空白卡片")} onClick={async () => {
+                  {!detachedId && (visibleCard.remindAt !== undefined
+                    ? <button className="cq-action-defer" onClick={async () => { if (busy) return; if (await remindBack(visibleCard)) finishCard(visibleCard.id); }} disabled={busy} aria-label={t("queue.放回队列")}><Icon name="undo" /><span className="cq-action-tooltip" role="tooltip">{t("queue.放回队列")}</span></button>
+                    : !inspecting && (!!visibleCard.session || !!visibleCard.harness) && visibleCard.phase !== "working" && <div className="cq-remind-menu">
+                      <button className="cq-action-defer" aria-label={t("queue.稍后提醒")} aria-haspopup="menu"><Icon name="down" /><span className="cq-action-tooltip" role="tooltip">{t("queue.稍后提醒")}</span></button>
+                      <div className="cq-remind-popover" role="menu" aria-label={t("queue.稍后提醒")}>
+                        {REMIND_OPTIONS.map((option) => <button key={option.minutes} role="menuitem" onClick={(event) => { void remindLater(visibleCard, option.minutes); event.currentTarget.blur(); }}><span className="cq-remind-option-icon" aria-hidden="true">⏰</span><span>{t(option.labelKey)}</span></button>)}
+                      </div>
+                    </div>)}
+                    {!detachedId && (!!visibleCard.session || !!visibleCard.harness) && <button className="cq-action-popout" onClick={popout} aria-label={t("queue.移出")}><Icon name="maximize" /><span className="cq-action-tooltip" role="tooltip">{t("queue.移出")}</span></button>}
+                    {!detachedId && (visibleCard.harness ? visibleCard.archivedAt === undefined : !inspecting && visibleCard.phase !== "working") && <button className="cq-action-archive" aria-label={(visibleCard.session || visibleCard.harness) ? t("queue.归档") : t("queue.关闭空白卡片")} onClick={async () => {
                       if (visibleCard.session || visibleCard.harness) {
                       if (busy) return;
                       if (!skipArchiveConfirmation) { setSkipArchiveChecked(false); setArchiveConfirm(visibleCard); return; }
@@ -751,7 +863,6 @@ export function CardQueueShell() {
                       if (result) finishCard(visibleCard.id);
                       return;
                     } const result = await run("remove", { id: visibleCard.id }); if (result) setInspecting(null); }}><Icon name={(visibleCard.session || visibleCard.harness) ? "archive" : "close"} /><span className="cq-action-tooltip" role="tooltip">{(visibleCard.session || visibleCard.harness) ? t("queue.归档") : t("queue.关闭空白卡片")}</span></button>}
-                  </>}
                   {detachedId && <button className="cq-action-archive" aria-label={t("queue.Attach")} onClick={() => returnToQueue()}><Icon name="undo" /><span className="cq-action-tooltip" role="tooltip">{t("queue.Attach")}</span></button>}
                 </div>
                 {layout?.rightToggle}
@@ -783,7 +894,7 @@ export function CardQueueShell() {
       onDismiss={dismissUrgent} onRead={() => {
         dismissUrgent();
         setSettings(false); setHistory(null); setFile(null); setCreating(false); setAddingWorkspace(false);
-        setArchiveConfirm(null); setDeferConfirm(null);
+        setArchiveConfirm(null);
         if (!detachedId) {
           const index = ready.findIndex((card) => card.id === urgentCard.id);
           if (index >= 0) { setInspecting(null); setFocus({ id: urgentCard.id, index }); setDeckReset((key) => key + 1); }
@@ -812,11 +923,15 @@ export function CardQueueShell() {
           {!working.length && <div className="cq-quiet"><span className="cq-quiet-mark">∿</span><p>{t("queue.后台暂时很安静")}</p><span>{t("queue.回复后的卡片会来到这里，")}<br />{t("queue.让 Agent 继续工作。")}</span></div>}
         </div>
         {!!detached.length && <><div className="cq-section-label"><span>{t("queue.独立标签页")}</span><span>{detached.length}</span></div><div className="cq-detached-list">{detached.map((card) => <button key={card.id} onClick={() => openDetachedCardTab(card.id)}><Icon name="out" size={14} /><span>{titleOf(card)}</span><i className={card.phase === "working" ? "cq-dot" : "cq-ready-dot"} /></button>)}</div></>}
+        {!!reminding.length && <><div className="cq-section-label"><span>{t("queue.稍后提醒")}</span><span>{remindCount.toString().padStart(2, "0")}</span></div><div className="cq-remind-list">{reminding.map((card) => <button key={card.id} className={`cq-small-card cq-remind-card ${inspecting === card.id ? "is-selected" : ""}`} onClick={() => setInspecting(card.id)}>
+          <span className="cq-small-meta"><Icon name="bell" size={11} />{displayProject(card)}<span className="cq-remind-countdown">{formatRemainder((card.remindAt ?? 0) - remindNow)}</span></span>
+          <strong>{titleOf(card)}</strong>
+        </button>)}</div></>}
         <div className="cq-sidebar-bottom"><button onClick={openHistory}><Icon name="history" />{t("queue.历史对话")}<span>↗</span></button></div>
       </aside>}
-      <div className="cq-content">
+      <div className="cq-content" ref={contentRef}>
         {!detachedId && <div className="cq-content-drag" data-tauri-drag-region aria-hidden="true" />}
-        {!detachedId && <div className="cq-content-toolbar">
+        {!detachedId && <div className={`cq-content-toolbar${toolbarCompact ? " is-compact" : ""}`} ref={toolbarRef}>
           <div className="cq-toolbar-menu">
             <button type="button" className="cq-toolbar-trigger" aria-haspopup="menu" aria-label={t("settings.appearance")} title={t("settings.appearance")}><ThemeIcon preference={preference} size={16} /></button>
             <div className="cq-toolbar-popover" role="menu" aria-label={t("settings.appearance")}>
@@ -872,7 +987,7 @@ export function CardQueueShell() {
           onDismiss={() => setClaimError("")}
           extraAction={{ label: t("queue.返回主页面"), onClick: () => void returnToQueue() }}
         />}
-        <div className="cq-stage" ref={stageRef}>
+        <div className="cq-stage" ref={stageRef} style={stageWidth !== null ? { width: stageWidth } : undefined}>
           {!queue ? <div className="cq-empty"><span className="cq-orbit"><Icon name="stack" size={34} /></span><h2>{error || "Connecting Cue…"}</h2></div> : active && canShowDetached ? <>
             {detachedId
               ? <div className="cq-static-card cq-single-mode-card">{renderCard(active)}</div>
@@ -928,7 +1043,6 @@ export function CardQueueShell() {
         if (workspaceThenCreate) setInspecting(result.cards.find(card => !card.session && !card.harness)?.id ?? null);
       }
     }} />}
-    {deferConfirm && <div className="cq-overlay" onClick={() => !busy && setDeferConfirm(null)}><section className="cq-dialog cq-defer-confirm" role="dialog" aria-modal="true" aria-label={queue?.sortMode === "score" ? t("queue.确认清零等待分") : t("queue.确认沉底")} onClick={(event) => event.stopPropagation()}><div className="cq-dialog-heading"><Icon name="down" /><button aria-label={t("queue.关闭")} disabled={busy} onClick={() => setDeferConfirm(null)}><Icon name="close" /></button></div><h2>{queue?.sortMode === "score" ? t("queue.确认清零等待分") : t("queue.确认沉底")}</h2><p>{queue?.sortMode === "score" ? t("queue.Wait 将从零重新累计。") : t("queue.这张卡片将移到队列底部。")}</p><div className="cq-confirm-actions"><button disabled={busy} onClick={() => setDeferConfirm(null)}>{t("queue.取消")}</button><button className="cq-primary cq-defer-confirm-button" disabled={busy} onClick={async () => { setBusy(true); const result = await shift(deferConfirm); setBusy(false); if (result) setDeferConfirm(null); }}>{queue?.sortMode === "score" ? t("queue.清零等待分") : t("queue.沉底")}</button></div></section></div>}
     {archiveConfirm && <div className="cq-overlay" onClick={() => !busy && setArchiveConfirm(null)}><section className="cq-dialog cq-archive-confirm" role="dialog" aria-modal="true" aria-label={t("queue.确认归档")} onClick={(event) => event.stopPropagation()}><div className="cq-dialog-heading"><Icon name="archive" /><button aria-label={t("queue.关闭")} disabled={busy} onClick={() => setArchiveConfirm(null)}><Icon name="close" /></button></div><h2>{t("queue.确认归档")}</h2><p>{t("queue.归档后会话将移到历史对话，之后仍可重新打开。")}</p><label className="cq-archive-skip"><input type="checkbox" checked={skipArchiveChecked} disabled={busy} onChange={event => setSkipArchiveChecked(event.target.checked)} /><span>{t("queue.skipArchiveThisPage")}<small>{t("queue.skipArchiveThisPageHint")}</small></span></label><div className="cq-confirm-actions"><button disabled={busy} onClick={() => setArchiveConfirm(null)}>{t("queue.取消")}</button><button className="cq-primary cq-danger" disabled={busy} onClick={async () => { setBusy(true); const result = await run("archive", { id: archiveConfirm.id }); setBusy(false); if (result) { if (skipArchiveChecked) setSkipArchiveConfirmation(true); advanceToNextCard(archiveConfirm.id); setArchiveConfirm(null); } }}>{t("queue.归档")}</button></div></section></div>}
     {history && <div className="cq-overlay" onClick={() => setHistory(null)}><section className="cq-dialog cq-history" role="dialog" aria-modal="true" aria-label={t("queue.历史对话")} onClick={(event) => event.stopPropagation()}><div className="cq-dialog-heading"><Icon name="history" /><button aria-label={t("queue.关闭")} onClick={() => setHistory(null)}><Icon name="close" /></button></div><h2>{t("queue.历史对话")}</h2><p>{t("queue.已收起的卡片和未在当前队列中的会话，点击即可继续。")}</p><input aria-label="搜索会话" placeholder={t("queue.搜索会话或项目…")} value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} /><div className="cq-history-list">{archived.filter(card => card.harness && `${titleOf(card)} ${card.cwd}`.toLowerCase().includes(historySearch.toLowerCase())).map(card => <button key={card.id} onClick={() => { setHistory(null); setInspecting(card.id); }}><span>{harnessName(card.harness!.kind)} · {titleOf(card)}</span><small>{projectOf(card.cwd)} · {new Date(card.archivedAt!).toLocaleDateString()}</small></button>)}{!archived.some(card => card.harness && `${titleOf(card)} ${card.cwd}`.toLowerCase().includes(historySearch.toLowerCase())) && <p>{historySearch ? t("queue.没有匹配的历史对话。") : t("queue.暂无未在队列中的历史对话。")}</p>}</div></section></div>}
     {settings && <SettingsPanel cwd={active?.cwd || defaultCwd || null} sessionId={active?.session?.id || null} initialSection={settingsSection} onClose={() => { setSettings(false); setModelsRefreshKey((key) => key + 1); void refreshRemoteHosts(); }} onSessionReloaded={() => { setSessionRefreshKey((key) => key + 1); void refresh(); }} quoteSelectionEnabled={quoteSelectionEnabled} onQuoteSelectionChange={setQuoteSelectionEnabled} />}
