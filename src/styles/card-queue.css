@@ -394,13 +394,13 @@ html.dark .cq-score-tooltip{border-color:#3a4037;background:#252824;color:#e7e7d
 .cq-remind-menu:hover>.cq-remind-popover,.cq-remind-menu:focus-within>.cq-remind-popover{opacity:1;visibility:visible;pointer-events:auto;transform:translateY(0)}
 .cq-remind-popover>button{display:flex;align-items:center;gap:8px;width:100%;min-height:31px;padding:0 9px;border:0;border-radius:7px;background:transparent;color:var(--cq-ink);font:inherit;font-size:12px;text-align:left;white-space:nowrap}
 .cq-remind-popover>button:hover,.cq-remind-popover>button:focus-visible{background:var(--cq-surface);outline:none}
-.cq-remind-option-icon{flex-shrink:0;font-size:12px}
+.cq-remind-popover-title{padding:4px 9px 6px;font-size:11px;font-weight:600;letter-spacing:.3px;color:var(--cq-muted);border-bottom:1px solid var(--cq-line);margin-bottom:3px}
 /* The reconnect frosted overlay paints at z-index 15, above the header's own
    z-index 6 stacking context; lift the header while the remind dropdown is
    open so the popover stays above the blur. */
 .cq-card-header:has(.cq-remind-menu:hover),
 .cq-card-header:has(.cq-remind-menu:focus-within) { z-index: 30; }
-.cq-remind-list{display:flex;flex-direction:column;gap:12px;flex:0 1 auto;min-height:0;max-height:34vh;overflow-y:auto;overscroll-behavior:contain;padding:2px}
+.cq-remind-list{display:flex;flex-direction:column;gap:12px;flex:0 1 auto;min-height:0;max-height:min(34vh, 204px);overflow-y:auto;overscroll-behavior:contain;padding:2px}
 .cq-remind-card{flex-shrink:0}
 .cq-remind-card strong{margin:8px 0 2px}
 .cq-remind-countdown{margin-left:auto;font-family:ui-monospace,monospace;color:#967000;opacity:.85}
@@ -710,7 +710,7 @@ html.dark .cq-inline-tools { --bg-hover: #30362e; --bg-selected: #394036; --text
 .cq-notification-alert button { flex-shrink: 0; border: 0; border-radius: 6px; padding: 6px 9px; background: var(--accent); color: #fff; font: inherit; cursor: pointer; }
 .cq-notification-alert .cq-notification-alert-close { padding: 2px 6px; background: transparent; color: var(--text-muted); font-size: 18px; line-height: 1; }
 
-.cq-archive-skip{display:flex;align-items:flex-start;gap:9px;margin:18px 0 22px;font-size:13px;cursor:pointer}.cq-archive-skip input{width:15px;height:15px;margin:2px 0 0;accent-color:var(--cq-ink)}.cq-archive-skip small{display:block;margin-top:5px;color:var(--cq-muted);font-size:12px;line-height:1.5}
+.cq-archive-skip{display:flex;align-items:flex-start;gap:9px;margin:18px 0 22px;font-size:13px;cursor:pointer}.cq-archive-skip input{width:15px;height:15px;margin:0;flex-shrink:0;accent-color:var(--cq-ink)}.cq-archive-skip span{line-height:15px}.cq-archive-skip small{display:block;margin-top:5px;color:var(--cq-muted);font-size:12px;line-height:1.5}
 
 /* Cue supports the same light/dark contract as Pi Web. Keep these
    overrides last because the v2 treatment above intentionally refines many
@@ -1203,16 +1203,23 @@ html .terminal-panel[data-terminal-theme="campbell"],
 .cq-harness-body { position:relative; }
 .cq-terminal-recovery {
   position:absolute; inset:0; z-index:15; display:grid; place-items:center;
-  background:color-mix(in srgb,var(--cq-paper) 65%,transparent);
-  backdrop-filter:blur(9px); -webkit-backdrop-filter:blur(9px);
+  background:color-mix(in srgb,var(--cq-paper) 45%,transparent);
 }
-.cq-terminal-recovery-content { display:flex; flex-direction:column; align-items:center; gap:16px; padding:24px; text-align:center; color:var(--cq-ink); }
-.cq-terminal-recovery h3 { margin:0; font-size:22px; font-weight:600; }
-.cq-terminal-recovery p { margin:0 0 8px; font-size:14px; color:var(--cq-muted); }
+.cq-terminal-recovery-content { display:flex; flex-direction:column; align-items:center; gap:16px; padding:24px 24px 96px; text-align:center; color:var(--cq-ink); }
+.cq-terminal-recovery h3 { margin:0 0 6px; font-size:22px; font-weight:600; }
+.cq-terminal-recovery p { margin:0 0 8px; font-size:14px; }
+.cq-terminal-recovery h3, .cq-terminal-recovery p {
+  color:#fff;
+  text-shadow:
+    -1.5px -1.5px 0 #000, 1.5px -1.5px 0 #000, -1.5px 1.5px 0 #000, 1.5px 1.5px 0 #000,
+    0 -2px 0 #000, 0 2px 0 #000, -2px 0 0 #000, 2px 0 0 #000;
+}
+.cq-terminal-recovery-badge { display:inline-flex; align-items:center; justify-content:center; width:56px; height:56px; border-radius:14px; background:#fff; border:1px solid var(--cq-line); box-shadow:0 4px 14px #2631241a; }
 .cq-terminal-recovery button { border:0; background:transparent; color:var(--cq-muted); padding:10px 18px; border-radius:10px; cursor:pointer; }
+.cq-terminal-recovery-view { position:absolute; left:16px; bottom:16px; z-index:16; padding:8px 12px !important; border:1px solid var(--cq-line) !important; border-radius:10px; background:var(--cq-paper) !important; color:var(--cq-ink) !important; font-size:12px; }
 .cq-terminal-recovery-actions { display:flex; flex-wrap:wrap; justify-content:center; gap:10px; }
-.cq-terminal-recovery .cq-terminal-recovery-primary { background:var(--cq-ink); color:var(--cq-paper); font-size:15px; font-weight:600; min-width:160px; }
-.cq-terminal-recovery .cq-terminal-recovery-all { background:var(--cq-line); color:var(--cq-ink); font-size:15px; font-weight:600; min-width:160px; }
+.cq-terminal-recovery .cq-terminal-recovery-primary { background:#e0f4e5; border:1px solid #b3e0be; color:#1f6b38; font-size:15px; font-weight:600; min-width:160px; }
+.cq-terminal-recovery .cq-terminal-recovery-all { background:#fff7d6; border:1px solid #e2d494; color:#8a711c; font-size:15px; font-weight:600; min-width:160px; }
 .cq-terminal-recovery button:disabled { opacity:.5; cursor:wait; }
 .cq-terminal-recovery-return { position:absolute; top:12px; right:16px; z-index:16; border:1px solid var(--cq-line); border-radius:10px; padding:10px 16px; background:var(--cq-paper); color:var(--cq-ink); cursor:pointer; }
 .cq-harness-body[data-disconnected="true"] .terminal-panel-messages { display:none; }

@@ -19,6 +19,8 @@ mod shell;
 mod signals;
 mod windows;
 
+use crate::winproc::NoWindow;
+
 pub use adapters::adapter;
 pub use debug::HarnessDebugSnapshot;
 pub use session_label::session_exists;
@@ -504,6 +506,7 @@ async fn detect_version(
     command.args(args);
     command.current_dir(&workspace.cwd);
     for (key, value) in env { command.env(key, value); }
+    command.no_window();
     let output = command.output().await.map_err(|e| AppError::msg(format!("启动检测失败：{e}")))?;
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }

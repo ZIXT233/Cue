@@ -5,6 +5,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::SystemTime;
 
+use crate::winproc::NoWindow;
+
 struct TitleCache {
     path: PathBuf,
     stamp: String,
@@ -128,6 +130,7 @@ fn sqlite_rollout_path(session_id: &str) -> Option<PathBuf> {
             db.to_str()?,
             &format!("select rollout_path from threads where id='{session_id}'"),
         ])
+        .no_window()
         .output()
         .ok()?;
     let path = String::from_utf8_lossy(&output.stdout).trim().to_string();

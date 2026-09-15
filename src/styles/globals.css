@@ -298,6 +298,7 @@ html.dark .web-login-error {
 }
 
 .terminal-status-dot.is-ready { background: #4ade80; }
+.terminal-status-dot.is-paused { background: #94a3b8; }
 .terminal-status-dot.is-exited,
 .terminal-status-dot.is-error { background: #f87171; }
 

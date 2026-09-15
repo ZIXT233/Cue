@@ -13,5 +13,5 @@ export function isSubmissionBehavior(value: unknown): value is SubmissionBehavio
 }
 
 export function submissionBehaviorFromStorage(stored: string | null): SubmissionBehavior {
-  return isSubmissionBehavior(stored) ? stored : "keep-in-view";
+  return isSubmissionBehavior(stored) ? stored : "collapse";
 }

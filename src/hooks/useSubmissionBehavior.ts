@@ -12,7 +12,7 @@ import {
 export function useSubmissionBehavior() {
   // Always start with the SSR-safe default so server/client markup matches.
   // localStorage is applied after mount.
-  const [mode, setModeState] = useState<SubmissionBehavior>("keep-in-view");
+  const [mode, setModeState] = useState<SubmissionBehavior>("collapse");
 
   useEffect(() => {
     const sync = () => {

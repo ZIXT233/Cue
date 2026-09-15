@@ -15,6 +15,7 @@ mod settings;
 mod ssh;
 mod terminal;
 mod transcript;
+mod winproc;
 
 use api::{build_state, start_server};
 use std::sync::Mutex;

@@ -9,6 +9,7 @@ use std::process::Stdio;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use tokio::process::Command;
+use crate::winproc::NoWindow;
 
 fn socket_root() -> PathBuf {
     static DIR: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
@@ -82,7 +83,7 @@ pub fn target_args(target: &RemoteHost, request_tty: bool) -> Vec<String> {
 
 pub async fn is_connected(host: &str) -> bool {
     let Ok(args) = connection_args(host, false).await else { return false };
-    Command::new("ssh").arg("-O").arg("check").args(args).output().await.map(|o| o.status.success()).unwrap_or(false)
+    Command::new("ssh").arg("-O").arg("check").args(args).no_window().output().await.map(|o| o.status.success()).unwrap_or(false)
 }
 
 pub async fn connect_host(host: &str, password: Option<String>, trusted_prompt: Option<String>) -> AppResult<()> {
@@ -95,7 +96,7 @@ pub async fn test_target(target: RemoteHost, password: Option<String>, trusted_p
 }
 
 async fn connect_args(mut args: Vec<String>, password: Option<String>, trusted_prompt: Option<String>) -> AppResult<()> {
-    let check = Command::new("ssh").arg("-O").arg("check").args(&args).output().await;
+    let check = Command::new("ssh").arg("-O").arg("check").args(&args).no_window().output().await;
     if check.map(|o| o.status.success()).unwrap_or(false) {
         return Ok(());
     }
@@ -143,6 +144,7 @@ async fn connect_args(mut args: Vec<String>, password: Option<String>, trusted_p
         .env("SSH_ASKPASS_REQUIRE", "force")
         .env("DISPLAY", ":0")
         .env("CUE_ASK_SOCKET", format!("127.0.0.1:{port}"))
+        .no_window()
         .output()
         .await
         .map_err(|e| classify_ssh(&e.to_string()))?;
@@ -200,6 +202,7 @@ pub async fn ssh_exec_stdin(host: &str, command: &str, stdin: &[u8]) -> AppResul
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .no_window()
         .spawn()
         .map_err(|e| classify_ssh(&e.to_string()))?;
     if let Some(mut input) = child.stdin.take() {

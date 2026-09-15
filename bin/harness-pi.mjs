@@ -22,12 +22,25 @@ export default function cueState(pi) {
     } catch { /* A status observer must not interrupt Pi. */ }
   }
   let working = false;
+  let settleTimer = null;
+  const cancelSettle = () => { if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; } };
+  const settle = (ctx) => { cancelSettle(); if (!working) return; working = false; emit('Stop', ctx); };
   pi.on('session_start', (_event, ctx) => emit('SessionStart', ctx));
   pi.on('session_info_changed', (_event, ctx) => emit('SessionInfo', ctx));
-  pi.on('before_agent_start', (event, ctx) => { emit('UserPromptSubmit', ctx, event.prompt); });
-  pi.on('agent_start', (_event, ctx) => { working = true; emit('UserPromptSubmit', ctx); });
-  // agent_end can precede retries/compaction. Only settled means done.
-  pi.on('agent_settled', (_event, ctx) => { working = false; emit('Stop', ctx); });
+  pi.on('before_agent_start', (event, ctx) => { cancelSettle(); emit('UserPromptSubmit', ctx, event.prompt); });
+  pi.on('agent_start', (_event, ctx) => { cancelSettle(); working = true; emit('UserPromptSubmit', ctx); });
+  // OMP 18.x dropped agent_settled — its end-of-run event is agent_end. Upstream pi
+  // still fires agent_settled, where agent_end alone can precede retries/compaction,
+  // so there agent_end only arms a short fallback that agent_settled short-circuits.
+  if (process.env.CUE_HARNESS_KIND === 'omp') {
+    pi.on('agent_end', (_event, ctx) => settle(ctx));
+  } else {
+    pi.on('agent_end', (_event, ctx) => {
+      cancelSettle();
+      settleTimer = setTimeout(() => { settleTimer = null; settle(ctx); }, 2500);
+    });
+    pi.on('agent_settled', (_event, ctx) => settle(ctx));
+  }
   pi.on('ui_prompt_start', (_event, ctx) => emit('PermissionRequest', ctx));
   pi.on('ui_prompt_end', (_event, ctx) => emit(working ? 'UserPromptSubmit' : 'Stop', ctx));
 }

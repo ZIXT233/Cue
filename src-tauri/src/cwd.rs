@@ -2,6 +2,7 @@ use crate::error::{AppError, AppResult};
 use crate::paths::expand_user;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use crate::winproc::NoWindow;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -96,6 +97,7 @@ pub async fn pick_local_folder(locale: Option<String>) -> AppResult<Option<Strin
     } else if cfg!(windows) {
         tokio::process::Command::new("powershell.exe")
             .args(["-NoProfile", "-STA", "-Command", "Add-Type -AssemblyName System.Windows.Forms; $dialog = New-Object System.Windows.Forms.FolderBrowserDialog; if ($dialog.ShowDialog() -eq \"OK\") { $dialog.SelectedPath }"])
+            .no_window()
             .output()
             .await
     } else {

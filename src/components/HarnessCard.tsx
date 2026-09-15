@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createShellProbe } from "@/lib/harness/shell-probe";
-import { harnessPicker } from "@/lib/harness/catalog";
+import { harnessPicker, harnessName, providerIconId } from "@/lib/harness/catalog";
 import { createPortal } from "react-dom";
 import { useI18n } from "@/hooks/useI18n";
 import { ProviderIcon } from "./ProviderIcon";
@@ -45,7 +45,16 @@ export function HarnessCard({ card, active, inQueue = false, children, onAction,
     return () => clearTimeout(shellTimer.current);
   }, [harness?.kind, harness?.shellCommandNotifications, harness?.shellCommandStartedAt, harness?.shellCommandRunning]);
   const ended = !!harness && (["exited", "error"].includes(harness.state) || terminalStatus === "exited");
-  const disconnected = !!harness && (ended || terminalStatus === "error" || terminalStatus === "connecting");
+  // A momentary "connecting" (deck re-focus, side-terminal tab switch) must not
+  // flash the recovery overlay; only a connection that stays down for a while
+  // counts as disconnected.
+  const [connectingSlow, setConnectingSlow] = useState(false);
+  useEffect(() => {
+    if (terminalStatus !== "connecting") { setConnectingSlow(false); return; }
+    const timer = setTimeout(() => setConnectingSlow(true), 3000);
+    return () => clearTimeout(timer);
+  }, [terminalStatus]);
+  const disconnected = !!harness && (ended || terminalStatus === "error" || connectingSlow);
   useEffect(() => { setShowTranscript(false); }, [disconnected, harness?.terminalId]);
   const fresh = !card.session && !harness;
   const probeDetail = harness?.kind === "shell" ? (harness.shellCommandNotifications === false ? t("harness.plainShell") : t("harness.shellHint"))
@@ -101,9 +110,13 @@ export function HarnessCard({ card, active, inQueue = false, children, onAction,
     {harness ? <div className="cq-harness-body" data-harness={harness.kind} data-disconnected={disconnected && !showTranscript ? "true" : undefined}>
       {disconnected && !showTranscript && <div className="cq-terminal-recovery" role="status">
         <div className="cq-terminal-recovery-content">
-          <svg aria-hidden="true" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3m6 0h4"/></svg>
-          <h3>{ended ? t(harness.kind === "shell" ? "harness.shellNotStarted" : "harness.processNotStarted") : terminalStatus === "connecting" ? t("harness.connecting") : t("harness.disconnected")}</h3>
-          <p>{ended ? t("harness.recordsKept") : t("harness.reconnectHint")}</p>
+          <span className="cq-terminal-recovery-badge" aria-hidden="true">
+            {harness.kind === "shell"
+              ? <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3m6 0h4"/></svg>
+              : <ProviderIcon id={providerIconId(harness.kind)} size={32} />}
+          </span>
+          <h3>{ended ? t("harness.processNotStarted", { name: harnessName(harness.kind) }) : terminalStatus === "connecting" ? t("harness.connecting") : t("harness.disconnected")}</h3>
+          {!ended && <p>{t("harness.reconnectHint")}</p>}
           {actionError && <p role="alert">{actionError}</p>}
           <div className="cq-terminal-recovery-actions">
             <button type="button" className="cq-terminal-recovery-primary" disabled={busy} onClick={() => {
@@ -118,8 +131,8 @@ export function HarnessCard({ card, active, inQueue = false, children, onAction,
               finally { setBusy(false); }
             })()}>{t("harness.startAllProcesses")}</button>}
           </div>
-          <button type="button" onClick={() => setShowTranscript(true)}>{t("harness.viewOutput")}</button>
         </div>
+        <button type="button" className="cq-terminal-recovery-view" onClick={() => setShowTranscript(true)}>{t("harness.viewOutput")}</button>
       </div>}
       {disconnected && showTranscript && <button type="button" className="cq-terminal-recovery-return" onClick={() => setShowTranscript(false)}>{t("harness.backToConnection")}</button>}
       {terminal}
@@ -128,7 +141,7 @@ export function HarnessCard({ card, active, inQueue = false, children, onAction,
       <p>{t("harness.chooseHint")}</p>
       <div className="cq-harness-options">
       {harnessPicker.map(item => <button key={item.id} type="button" className="cq-harness-option" disabled={busy} onClick={() => void act("harness_start", { kind: item.id })}>
-        <span className="cq-harness-option-icon" aria-hidden="true">{item.id === "shell" ? <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3m6 0h4"/></svg> : item.id === "pi" || item.id === "omp" ? <span className="cq-harness-pi-mark">π</span> : <ProviderIcon id={({ codex: "openai", claude: "anthropic", gemini: "google", antigravity: "google" } as Record<string, string>)[item.id] ?? item.id} size={28} />}</span>
+        <span className="cq-harness-option-icon" aria-hidden="true">{item.id === "shell" ? <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3m6 0h4"/></svg> : item.id === "pi" || item.id === "omp" ? <span className="cq-harness-pi-mark">π</span> : <ProviderIcon id={providerIconId(item.id)} size={28} />}</span>
         <span><strong>{item.name}</strong><small>{busy ? t("harness.checking") : item.id === "shell" ? t("harness.shellDescription") : item.description}</small></span><span className="cq-harness-option-arrow" aria-hidden="true">↗</span>
       </button>)}
       </div>

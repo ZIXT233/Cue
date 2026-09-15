@@ -16,7 +16,7 @@ import { MAX_ATTACHED_IMAGE_BYTES, MAX_ATTACHED_IMAGES } from "@/lib/image-attac
 import type { TerminalEvent } from "@/lib/terminal-manager";
 import type { TerminalTab } from "./terminal-tab-state";
 
-export type TerminalConnectionStatus = "connecting" | "ready" | "exited" | "error";
+export type TerminalConnectionStatus = "connecting" | "ready" | "exited" | "error" | "paused";
 interface Props {
   onOutput?: (data: string) => void;
   onStatusChange?: (status: TerminalConnectionStatus) => void;
@@ -49,6 +49,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
   const terminalRef = useRef<Terminal | null>(null);
   const startRef = useRef<Promise<void>>(Promise.resolve());
   const writerRef = useRef<ReturnType<typeof createTerminalWriter> | null>(null);
+  const liveControlRef = useRef<((live: boolean) => void) | null>(null);
   const callbacksRef = useRef({ onClosed, onCloseError, onOutput, onUnavailable });
   callbacksRef.current = { onClosed, onCloseError, onOutput, onUnavailable };
   const focusReportingRef = useRef(focusReporting);
@@ -62,7 +63,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
     if (!focusReportingRef.current || !focusArmedRef.current) return;
     writerRef.current?.write(inQueueNow ? "\x1b[I" : "\x1b[O");
   }, []);
-  const [status, setStatus] = useState<"connecting" | "ready" | "exited" | "error">("connecting");
+  const [status, setStatus] = useState<TerminalConnectionStatus>("connecting");
   const [error, setError] = useState<string | null>(null);
   const [exitCode, setExitCode] = useState<number | null>(null);
   const [reconnectKey, setReconnectKey] = useState(0);
@@ -341,6 +342,31 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       reconnectAttempt += 1;
       reconnectTimer = setTimeout(connect, delay);
     };
+    // Background cards (deck neighbors, hidden side-terminal tabs, closed side
+    // panels) must not hold a live SSE: every mounted panel opens one and the
+    // WebView caps concurrent connections per host, so background streams
+    // starve the foreground ones and connections visibly "drop". Pausing keeps
+    // the offset; resuming replays exactly the missed range from the backlog.
+    let live = true;
+    const setLive = (on: boolean) => {
+      if (disposed || exited || on === live) return;
+      live = on;
+      if (on) {
+        reconnectAttempt = 0;
+        resyncing = false;
+        setStatus("connecting");
+        connect();
+        return;
+      }
+      if (inputRaf) { cancelAnimationFrame(inputRaf); flushInput(); }
+      connected = false;
+      terminal.options.disableStdin = true;
+      clearTimeout(reconnectTimer);
+      events?.close();
+      events = null;
+      setStatus((current) => current === "connecting" || current === "ready" ? "paused" : current);
+    };
+    liveControlRef.current = setLive;
     const enqueueOutput = (event: Extract<TerminalEvent, { type: "output" }>) => {
       hideConptyCursor();
       if (focusReportingRef.current && event.data.includes("\x1b[?1004h")) {
@@ -360,7 +386,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       publishProbe("ready");
     };
     const connect = () => {
-      if (disposed || exited || !navigator.onLine) return;
+      if (disposed || exited || !live || !navigator.onLine) return;
       events?.close();
       events = new EventSource(`/api/terminal/${encodeURIComponent(id)}/events${offset === undefined ? "" : `?after=${offset}`}`);
       events.onmessage = (message) => {
@@ -468,6 +494,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
     window.addEventListener("online", connect);
     return () => {
       disposed = true;
+      liveControlRef.current = null;
       if (focusReportingRef.current && focusArmedRef.current && !inQueueRef.current) writer.write("\x1b[O");
       clearTimeout(conptyRevealTimer);
       clearTimeout(reconnectTimer);
@@ -498,6 +525,8 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       terminalRef.current = null;
     };
   }, [id, cwd, restored, reconnectKey, readOnly, themeProfile, remote]);
+
+  useEffect(() => { liveControlRef.current?.(active); }, [active]);
 
   useEffect(() => { onStatusChange?.(status); }, [status, onStatusChange]);
 

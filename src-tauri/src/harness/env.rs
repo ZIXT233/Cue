@@ -1,4 +1,5 @@
 use crate::error::AppResult;
+use crate::winproc::NoWindow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -11,7 +12,7 @@ pub async fn local_environment(force: bool) -> AppResult<HashMap<String, String>
         let command = format!(
             "$e=@{{}};[Environment]::GetEnvironmentVariables().GetEnumerator()|ForEach-Object{{$e[$_.Key]=[string]$_.Value}};[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false);[Console]::Write('{START}');[Console]::Write(($e|ConvertTo-Json -Compress));[Console]::Write('{END}')"
         );
-        tokio::process::Command::new("powershell.exe").args(["-NoLogo", "-Command", &command]).output().await
+        tokio::process::Command::new("powershell.exe").args(["-NoLogo", "-Command", &command]).no_window().output().await
     } else {
         let command = format!("printf '{START}\\0'; /usr/bin/env -0; printf '{END}\\0'");
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());

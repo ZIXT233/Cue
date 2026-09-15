@@ -104,7 +104,7 @@ const openDetachedCardTab = async (cardId: string) => {
   return tab;
 };
 
-function Icon({ name, size = 18 }: { name: "plus" | "stack" | "out" | "maximize" | "down" | "close" | "settings" | "history" | "archive" | "arrow" | "undo" | "bell" | "bell-filled" | "tools"; size?: number }) {
+function Icon({ name, size = 18 }: { name: "plus" | "stack" | "out" | "maximize" | "down" | "close" | "settings" | "history" | "archive" | "arrow" | "undo" | "bell" | "bell-filled" | "tools" | "clock"; size?: number }) {
   if (name === "bell-filled") return <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a6 6 0 0 0-6 6v2.9c0 2.1-.8 4.1-2.3 5.6A1.2 1.2 0 0 0 4.6 19h14.8a1.2 1.2 0 0 0 .9-2.5c-1.5-1.5-2.3-3.5-2.3-5.6V8a6 6 0 0 0-6-6Zm-2.7 19a3 3 0 0 0 5.4 0H9.3Z" /></svg>;
   const paths = {
     plus: "M12 5v14M5 12h14", stack: "m3 7 9-4 9 4-9 4-9-4Zm0 5 9 4 9-4M3 17l9 4 9-4",
@@ -116,6 +116,7 @@ function Icon({ name, size = 18 }: { name: "plus" | "stack" | "out" | "maximize"
     bell: "M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4",
     undo: "m9 14-5-5 5-5M4 9h10a6 6 0 0 1 0 12h-1",
     tools: "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9z",
+    clock: "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0M12 7v5l3.5 2",
   };
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]} /></svg>;
 }
@@ -847,13 +848,14 @@ export function CardQueueShell() {
                   {!detachedId && (visibleCard.remindAt !== undefined
                     ? <button className="cq-action-defer" onClick={async () => { if (busy) return; if (await remindBack(visibleCard)) finishCard(visibleCard.id); }} disabled={busy} aria-label={t("queue.放回队列")}><Icon name="undo" /><span className="cq-action-tooltip" role="tooltip">{t("queue.放回队列")}</span></button>
                     : !inspecting && (!!visibleCard.session || !!visibleCard.harness) && visibleCard.phase !== "working" && <div className="cq-remind-menu">
-                      <button className="cq-action-defer" aria-label={t("queue.稍后提醒")} aria-haspopup="menu"><Icon name="down" /><span className="cq-action-tooltip" role="tooltip">{t("queue.稍后提醒")}</span></button>
+                      <button className="cq-action-defer" aria-label={t("queue.稍后提醒")} aria-haspopup="menu"><Icon name="clock" /></button>
                       <div className="cq-remind-popover" role="menu" aria-label={t("queue.稍后提醒")}>
-                        {REMIND_OPTIONS.map((option) => <button key={option.minutes} role="menuitem" onClick={(event) => { void remindLater(visibleCard, option.minutes); event.currentTarget.blur(); }}><span className="cq-remind-option-icon" aria-hidden="true">⏰</span><span>{t(option.labelKey)}</span></button>)}
+                        <div className="cq-remind-popover-title" aria-hidden="true">{t("queue.稍后提醒")}</div>
+                        {REMIND_OPTIONS.map((option) => <button key={option.minutes} role="menuitem" onClick={(event) => { void remindLater(visibleCard, option.minutes); event.currentTarget.blur(); }}><span>{t(option.labelKey)}</span></button>)}
                       </div>
                     </div>)}
                     {!detachedId && (!!visibleCard.session || !!visibleCard.harness) && <button className="cq-action-popout" onClick={popout} aria-label={t("queue.移出")}><Icon name="maximize" /><span className="cq-action-tooltip" role="tooltip">{t("queue.移出")}</span></button>}
-                    {!detachedId && (visibleCard.harness ? visibleCard.archivedAt === undefined : !inspecting && visibleCard.phase !== "working") && <button className="cq-action-archive" aria-label={(visibleCard.session || visibleCard.harness) ? t("queue.归档") : t("queue.关闭空白卡片")} onClick={async () => {
+                    {!detachedId && (visibleCard.harness ? visibleCard.archivedAt === undefined && visibleCard.phase !== "working" : !inspecting && visibleCard.phase !== "working") && <button className="cq-action-archive" aria-label={(visibleCard.session || visibleCard.harness) ? t("queue.归档") : t("queue.关闭空白卡片")} onClick={async () => {
                       if (visibleCard.session || visibleCard.harness) {
                       if (busy) return;
                       if (!skipArchiveConfirmation) { setSkipArchiveChecked(false); setArchiveConfirm(visibleCard); return; }

@@ -4,7 +4,7 @@ export const harnessCatalog: { id: HarnessId; name: string; description: string;
   { id: "codex", name: "Codex", description: "OpenAI · CLI" },
   { id: "claude", name: "Claude Code", description: "Anthropic · CLI" },
   { id: "cursor", name: "Cursor Agent", description: "Cursor · CLI" },
-  { id: "pi", name: "Pi CLI", description: "Pi · CLI" },
+  { id: "pi", name: "Pi", description: "Pi · CLI" },
   { id: "omp", name: "Oh My Pi", description: "OMP · CLI" },
   { id: "grok", name: "Grok Build", description: "xAI · CLI" },
   { id: "antigravity", name: "Antigravity CLI", description: "Google · CLI", hidden: true },
@@ -13,3 +13,6 @@ export const harnessCatalog: { id: HarnessId; name: string; description: string;
 ];
 export const harnessPicker = harnessCatalog.filter(item => !item.hidden);
 export const harnessName = (id: HarnessId) => harnessCatalog.find(item => item.id === id)?.name ?? id;
+
+const PROVIDER_ICON_IDS: Record<string, string> = { codex: "openai", claude: "anthropic", gemini: "google", antigravity: "google" };
+export const providerIconId = (id: string) => PROVIDER_ICON_IDS[id] ?? id;
