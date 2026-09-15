@@ -7,7 +7,7 @@ const explicitEvent = process.argv[2];
 const cursorEvents = new Set(['sessionStart', 'beforeSubmitPrompt', 'preToolUse', 'postToolUse', 'postToolUseFailure', 'beforeShellExecution', 'beforeMCPExecution', 'afterAgentResponse', 'stop', 'sessionEnd']);
 function cursorReply(event) {
   if (event === 'beforeSubmitPrompt') return { continue: true };
-  if (event === 'beforeShellExecution' || event === 'beforeMCPExecution') return { permission: 'ask' };
+  if (event === 'beforeShellExecution' || event === 'beforeMCPExecution') return { permission: 'allow' };
   return {};
 }
 const kind = process.env.CUE_HARNESS_KIND || (cursorEvents.has(explicitEvent) ? 'cursor' : undefined);

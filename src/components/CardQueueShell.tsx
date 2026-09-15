@@ -35,7 +35,7 @@ import { CardDeck } from "./CardDeck";
 import { CardQueueMinimap } from "./CardQueueMinimap";
 import { CardQuickSearch, type CardQuickSearchItem } from "./CardQuickSearch";
 import { getLastSettingsSection, type SettingsSection } from "@/lib/settings-navigation";
-import { disposeCardSideTerminals, disposeInactiveCardSideTerminals } from "@/lib/card-side-terminals";
+import { disposeCardSideTerminals, disposeInactiveCardSideTerminals, type RemoteShellTarget } from "@/lib/card-side-terminals";
 import { CardSideTerminal, CardWorkspace, SideTerminalButton } from "./CardSideTerminal";
 import { DetachedCardTools, type DetachedCardLayoutControls } from "./DetachedCardTools";
 import { useAudio } from "@/hooks/useAudio";
@@ -243,6 +243,10 @@ export function CardQueueShell() {
     return `${host} · ${harnessName(card.harness.kind)}`;
   };
   const workspaceOf = (card: QueueCard) => workspaces.find((workspace) => workspace.id === card.workspaceId);
+  // A remote workspace's side terminals run on its host, in its remote directory:
+  // the card's own `cwd` is a local runtime directory when the workspace is remote.
+  const remoteShellOf = (workspace?: QueueWorkspace): RemoteShellTarget | undefined =>
+    workspace?.kind === "ssh" && workspace.sshHost ? { host: workspace.sshHost, cwd: workspace.cwd } : undefined;
   const displayProject = (card: QueueCard) => workspaceOf(card)?.name || projectOf(card.cwd);
   const working = cards.filter((card) => card.phase === "working" && !card.detached && !pendingDetach.has(card.id) && !card.harness?.setup);
   const archived = cards.filter((card) => card.archivedAt !== undefined).sort((a, b) => b.archivedAt! - a.archivedAt!);
@@ -822,7 +826,7 @@ export function CardQueueShell() {
     const showScore = !!(visibleCard.session || visibleCard.harness) && queue?.sortMode === "score" && visibleCard.phase === "attention";
     const showHeaderMeta = showScore || visibleCard.phase !== "attention" || hasUrgentCall(visibleCard) || visibleCard.remindAt !== undefined || !(visibleCard.session || visibleCard.harness);
     const harness = (
-              <HarnessCard key={`${visibleCard.id}:${visibleCard.workspaceId}`} card={visibleCard} active={isFront} inQueue={!detachedId && !visibleCard.detached && visibleCard.phase !== "working"} onStartAll={startable.length > 1 ? startAllHarnesses : undefined} onAction={async (action, data) => {
+              <HarnessCard key={`${visibleCard.id}:${visibleCard.workspaceId}`} card={visibleCard} active={isFront} inQueue={!detachedId && !visibleCard.detached && visibleCard.phase !== "working"} sshHost={workspace?.kind === "ssh" ? workspace.sshHost : undefined} sshHostName={remoteHost?.name ?? workspace?.sshHost} onStartAll={startable.length > 1 ? startAllHarnesses : undefined} onAction={async (action, data) => {
                 const result = await act(action, data);
                 if (result && action === "harness_start") {
                   setInspecting(null); setFocus({ id: visibleCard.id, index: 0 }); setDeckReset(key => key + 1);
@@ -832,7 +836,7 @@ export function CardQueueShell() {
               }} />
     );
     return (
-    <CardSideTerminal key={visibleCard.id} cardId={visibleCard.id} cwd={visibleCard.cwd} remote={workspace?.kind === "ssh"} active={isFront} enabled={!layout} saved={visibleCard.sideTerminals} savedOpen={visibleCard.sideTerminalOpen}>
+    <CardSideTerminal key={visibleCard.id} cardId={visibleCard.id} cwd={visibleCard.cwd} remoteShell={remoteShellOf(workspace)} active={isFront} enabled={!layout} saved={visibleCard.sideTerminals} savedOpen={visibleCard.sideTerminalOpen}>
       {({ button: sideButton, panel: sidePanel }) => (
     <article aria-hidden={!isFront} inert={!isFront} className="cq-large-card cq-continuous-card" data-transfer-id={visibleCard.id} data-transfer-zone="attention" data-card-id={visibleCard.id} data-phase={visibleCard.phase} data-working-view={visibleCard.phase === "working"} data-urgent-call={hasUrgentCall(visibleCard)}>
               <div className="cq-card-header">{detachedId && <div className="cq-detached-drag" data-tauri-drag-region aria-hidden="true" />}{layout?.leftToggle}<div className="cq-card-identity">{showHeaderMeta && <div className="cq-card-meta">{visibleCard.phase !== "attention" && <div className="cq-card-state"><i className={visibleCard.phase === "working" ? "cq-dot" : "cq-ready-dot"} />{visibleCard.phase === "draft" ? t("queue.新的思路") : t("queue.WORKING")}</div>}{hasUrgentCall(visibleCard) && <span className="cq-urgent-label" title={t("queue.urgentPriority")}>🚨 Urgent Call</span>}{visibleCard.remindAt !== undefined && <span className="cq-remind-label" title={t("queue.稍后提醒")}>⏰ {t("queue.稍后提醒")} · {formatRemainder((visibleCard.remindAt ?? 0) - remindNow)}</span>}{!(visibleCard.session || visibleCard.harness) && <PriorityBadge weight={visibleCard.priorityWeight ?? 0} enabled={isFront} onSave={weight => run("priority_weight", {id:visibleCard.id,weight})} />}{showScore && <div className="cq-score-row">
@@ -843,7 +847,7 @@ export function CardQueueShell() {
                   <span className="cq-score-term"><span className="cq-score-operator">+</span><ScoreChipTooltip text={t("queue.等待分钟", { minutes: waitMinutes })}><span className="cq-score-chip cq-score-wait"><span aria-hidden="true">⏳</span> {t("queue.Wait")} <b>{cardScore.waiting}</b></span></ScoreChipTooltip></span>
                   {cardScore.tags.map(tag => <span className="cq-score-term" key={tag.name}><span className="cq-score-operator">+</span><ScoreChipTooltip text={tag.description}><span className="cq-score-chip" style={tagColor(tag.name)}>{tag.name} <b>{tag.weight}</b></span></ScoreChipTooltip></span>)}
                 </span>
-              </div>}<div className="cq-meta-harness" /></div>}<div className="cq-card-title-row"><div className="cq-title-primary"><h2>{titleOf(visibleCard)}</h2>{workspace?.kind === "ssh" ? <ScoreChipTooltip text={<div className="cq-environment-tooltip"><span><WorkspaceMachineIcon name="remote" size={14} />{hostLabel}</span><small>{remoteAddress}</small></div>}><span className="cq-title-environment cq-title-host" aria-label={hostWithHarness}><WorkspaceMachineIcon name="remote" size={15} /><b title={hostWithHarness}>{hostWithHarness}</b></span></ScoreChipTooltip> : <span className="cq-title-environment cq-title-host" aria-label={hostWithHarness}><WorkspaceMachineIcon name="local" size={15} /><b title={hostWithHarness}>{hostWithHarness}</b></span>}<ScoreChipTooltip text={<div className="cq-environment-tooltip"><span><WorkspaceMachineIcon name="folder" size={14} />{workspaceLabel}</span><small>{workspace?.cwd || visibleCard.cwd}</small></div>}><span className="cq-title-environment cq-title-workspace" aria-label={workspaceLabel}><WorkspaceMachineIcon name="folder" size={15} /><b>{workspaceLabel}</b></span></ScoreChipTooltip></div><div className="cq-title-controls"><div className="cq-title-harness" /><div className="cq-title-branches" /><div className="cq-title-tools">{layout ? <SideTerminalButton disabled={workspace?.kind === "ssh"} pressed={layout.terminalOpen} label={workspace?.kind === "ssh" ? t("queue.remoteToolsUnavailable") : t("queue.sideTerminal")} onClick={layout.toggleTerminal} /> : sideButton}</div></div></div></div>
+              </div>}<div className="cq-meta-harness" /></div>}<div className="cq-card-title-row"><div className="cq-title-primary"><h2>{titleOf(visibleCard)}</h2>{workspace?.kind === "ssh" ? <ScoreChipTooltip text={<div className="cq-environment-tooltip"><span><WorkspaceMachineIcon name="remote" size={14} />{hostLabel}</span><small>{remoteAddress}</small></div>}><span className="cq-title-environment cq-title-host" aria-label={hostWithHarness}><WorkspaceMachineIcon name="remote" size={15} /><b title={hostWithHarness}>{hostWithHarness}</b></span></ScoreChipTooltip> : <span className="cq-title-environment cq-title-host" aria-label={hostWithHarness}><WorkspaceMachineIcon name="local" size={15} /><b title={hostWithHarness}>{hostWithHarness}</b></span>}<ScoreChipTooltip text={<div className="cq-environment-tooltip"><span><WorkspaceMachineIcon name="folder" size={14} />{workspaceLabel}</span><small>{workspace?.cwd || visibleCard.cwd}</small></div>}><span className="cq-title-environment cq-title-workspace" aria-label={workspaceLabel}><WorkspaceMachineIcon name="folder" size={15} /><b>{workspaceLabel}</b></span></ScoreChipTooltip></div><div className="cq-title-controls"><div className="cq-title-harness" /><div className="cq-title-branches" /><div className="cq-title-tools">{layout ? <SideTerminalButton pressed={layout.terminalOpen} label={t("queue.sideTerminal")} onClick={layout.toggleTerminal} /> : sideButton}</div></div></div></div>
                 <div className="cq-card-actions">
                   {!detachedId && (visibleCard.remindAt !== undefined
                     ? <button className="cq-action-defer" onClick={async () => { if (busy) return; if (await remindBack(visibleCard)) finishCard(visibleCard.id); }} disabled={busy} aria-label={t("queue.放回队列")}><Icon name="undo" /><span className="cq-action-tooltip" role="tooltip">{t("queue.放回队列")}</span></button>
@@ -877,7 +881,7 @@ export function CardQueueShell() {
   };
 
   const renderCard = (card: QueueCard, isFront = true) => detachedId ? (
-    <DetachedCardTools key={`${card.id}:${card.workspaceId}`} cardId={card.id} cwd={card.cwd} sessionId={card.session?.id ?? card.id} remote={workspaceOf(card)?.kind === "ssh"} saved={card.sideTerminals} savedOpen={card.sideTerminalOpen} onSettings={(section) => { setSettingsSection(section); setSettings(true); }}>
+    <DetachedCardTools key={`${card.id}:${card.workspaceId}`} cardId={card.id} cwd={card.cwd} sessionId={card.session?.id ?? card.id} remoteShell={remoteShellOf(workspaceOf(card))} saved={card.sideTerminals} savedOpen={card.sideTerminalOpen} onSettings={(section) => { setSettingsSection(section); setSettings(true); }}>
       {layout => renderCardContent(card, isFront, layout)}
     </DetachedCardTools>
   ) : renderCardContent(card, isFront);

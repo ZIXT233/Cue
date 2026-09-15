@@ -1,7 +1,7 @@
 "use client";
 import { useI18n } from "@/hooks/useI18n";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { machineErrorKey, WorkspaceMachineError } from "@/lib/workspace-machine-errors";
+import { machineErrorText, WorkspaceMachineError } from "@/lib/workspace-machine-errors";
 import { WorkspaceMachineIcon } from "./WorkspaceMachineIcon";
 import { machineRequest } from "./RemoteHostsSettings";
 import type { RemoteHost } from "@/lib/remote-hosts";
@@ -173,7 +173,7 @@ export function WorkspaceForm({ defaultCwd, entry, onSave, onClose, onBack, busy
   const directoryOptions = [...(cwd.startsWith('/') && cwd !== '/' ? [{ name: t('machines.parent'), path: parentPath, parent: true }] : []), ...directories.map(dir => ({ ...dir, parent: false }))];
   const formBlocked = busy || loading;
   const cancelAuth = () => { cancelConnection(); clearAuth(); setLocalError(null); };
-  const alert = localError ? t(machineErrorKey(localError)) : error ? t('machines.error.REQUEST_FAILED') : '';
+  const alert = localError ? machineErrorText(localError, t) : error ? machineErrorText(error, t) : '';
   const awaitingRemoteConnection = !!remote && !cwd;
   return <div className="cq-overlay" onClick={() => !busy && close()}>
     <section className="cq-workspace-picker machine-dialog" role="dialog" aria-modal="true" aria-label={t('machines.newWorkspace')} onClick={e => e.stopPropagation()} onKeyDown={e => {
@@ -205,7 +205,7 @@ export function WorkspaceForm({ defaultCwd, entry, onSave, onClose, onBack, busy
           }} />
           {remote && directoryOpen && <div className="remote-directory-popup">
             <div id="remote-directories" className="remote-directories" role="listbox" aria-label={t('machines.directoryOptions')}>{directoryOptions.map((dir, i) => <button id={`remote-dir-${i}`} key={dir.path} type="button" role="option" aria-selected={selected === i} tabIndex={-1} onMouseDown={e => e.preventDefault()} onClick={() => { setCwd(dir.path); setDirectoryOpen(true); }}><WorkspaceMachineIcon name={dir.parent ? "parent" : "folder"} size={16} /><span>{dir.parent ? `.. / ${dir.name}` : dir.name}</span><WorkspaceMachineIcon name="chevron" size={12} /></button>)}</div>
-            <p className={directoryError ? 'machine-error' : 'machine-help'}>{browsing ? t('machines.reading') : directoryError ? t(machineErrorKey(directoryError)) : t(truncated ? 'machines.truncated' : directories.length ? 'machines.directoryHelp' : 'machines.emptyDirectories')}</p>
+            <p className={directoryError ? 'machine-error' : 'machine-help'}>{browsing ? t('machines.reading') : directoryError ? machineErrorText(directoryError, t) : t(truncated ? 'machines.truncated' : directories.length ? 'machines.directoryHelp' : 'machines.emptyDirectories')}</p>
           </div>}
           </div>
           {remote ? <p className="machine-help">{t('machines.directoryHelp')}</p> : <button className="machine-browse-folder" type="button" disabled={formBlocked} onClick={() => void pickLocal()}><WorkspaceMachineIcon name="folder" size={18} /><span><strong>{t(loading ? 'machines.pickerWaiting' : 'machines.browse')}</strong><small>{t('machines.localHint')}</small></span><WorkspaceMachineIcon name="chevron" size={14} /></button>}

@@ -60,7 +60,7 @@ pub fn windows_hook_command(node: &str, hook: &str, event: Option<&str>, extra_e
 pub fn cursor_hook_stdout(event: Option<&str>) -> &'static str {
     match event {
         Some("beforeSubmitPrompt") => r#"{"continue":true}"#,
-        Some("beforeShellExecution") | Some("beforeMCPExecution") => r#"{"permission":"ask"}"#,
+        Some("beforeShellExecution") | Some("beforeMCPExecution") => r#"{"permission":"allow"}"#,
         _ => "{}",
     }
 }

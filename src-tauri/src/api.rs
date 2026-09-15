@@ -103,9 +103,17 @@ async fn post_queue(State(state): State<AppState>, Json(mut body): Json<Value>) 
         let host = body.get("sshHost").and_then(|v| v.as_str()).unwrap_or_default().to_string();
         let cwd_in = body.get("cwd").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
         if regex::Regex::new(r"^[a-zA-Z0-9][a-zA-Z0-9._@:-]*$").unwrap().is_match(&host) && cwd_in.starts_with('/') {
-            let resolved = String::from_utf8_lossy(
-                &ssh_exec(&host, &format!("cd {} && pwd -P", shell_quote(&cwd_in))).await?,
-            ).trim().to_string();
+            crate::debuglog::log(&format!("api: workspace_create validating ssh host={host:?} cwd={cwd_in:?}"));
+            let resolved = match ssh_exec(&host, &format!("cd {} && pwd -P", shell_quote(&cwd_in))).await {
+                Ok(output) => {
+                    crate::debuglog::log(&format!("api: workspace_create validation OK host={host:?} pwd={:?}", String::from_utf8_lossy(&output).trim()));
+                    String::from_utf8_lossy(&output).trim().to_string()
+                }
+                Err(error) => {
+                    crate::debuglog::log_error(&format!("api: workspace_create validation FAILED host={host:?}"), &error);
+                    return Err(error);
+                }
+            };
             if resolved.starts_with('/') {
                 if let Some(obj) = body.as_object_mut() {
                     obj.insert("cwd".into(), json!(resolved));
@@ -318,7 +326,7 @@ fn apply_action(queue: &mut CardQueue, body: &Value, action: &str, state: &AppSt
                 (cwd.to_string_lossy().into_owned(), None, cwd.to_string_lossy().into_owned(), Uuid::new_v4().to_string())
             } else {
                 let host = body.get("sshHost").and_then(|v| v.as_str()).unwrap_or_default();
-                if !regex::Regex::new(r"^[a-zA-Z0-9][a-zA-Z0-9._@:-]*$").unwrap().is_match(host) {
+                if !valid_ssh_host(host) {
                     return Err(AppError::msg("请输入 SSH 主机别名或 user@host"));
                 }
                 if !cwd_in.starts_with('/') { return Err(AppError::msg("SSH 工作目录请使用绝对路径")); }
@@ -482,17 +490,61 @@ async fn list_machines(State(state): State<AppState>) -> AppResult<impl IntoResp
 }
 
 async fn machine_action(State(state): State<AppState>, Json(body): Json<Value>) -> impl IntoResponse {
+    let action = body.get("action").and_then(|v| v.as_str()).unwrap_or_default();
+    crate::debuglog::log(&format!(
+        "machine_action: action={action} body_keys={:?}",
+        body.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()).unwrap_or_default()
+    ));
     match machine_action_inner(&state, body).await {
         Ok(value) => (StatusCode::OK, Json(value)).into_response(),
-        Err(error) => error.into_response(),
+        Err(error) => {
+            crate::debuglog::log_error("machine_action error", &error);
+            error.into_response()
+        }
     }
+}
+
+#[derive(Deserialize)]
+struct TestHostInput {
+    hostname: String,
+    #[serde(default)]
+    user: Option<String>,
+    #[serde(default)]
+    port: Option<u16>,
+}
+
+#[derive(Deserialize)]
+struct SaveHostInput {
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    hostname: String,
+    #[serde(default)]
+    user: Option<String>,
+    #[serde(default)]
+    port: Option<u16>,
 }
 
 async fn machine_action_inner(state: &AppState, body: Value) -> AppResult<Value> {
     let action = body.get("action").and_then(|v| v.as_str()).unwrap_or_default();
     match action {
         "save" => {
-            let host: RemoteHost = serde_json::from_value(body.get("host").cloned().unwrap_or(json!({})))?;
+            // The editor may submit an unsaved host (no id yet); accept the
+            // partial form and default name/id like HostStore::save expects.
+            let input: SaveHostInput = serde_json::from_value(body.get("host").cloned().unwrap_or(json!({})))?;
+            let name = input.name.filter(|name| !name.trim().is_empty()).unwrap_or_else(|| input.hostname.clone());
+            let host = RemoteHost {
+                id: input.id.unwrap_or_default(),
+                name,
+                hostname: input.hostname,
+                user: input.user.filter(|user| !user.is_empty()),
+                port: input.port,
+                identity_file: None,
+                source: "web".into(),
+                visible: None,
+                connected: None,
+            };
             Ok(json!({ "host": state.hosts.save(host).await? }))
         }
         "delete" => {
@@ -507,9 +559,31 @@ async fn machine_action_inner(state: &AppState, body: Value) -> AppResult<Value>
             Ok(json!({ "ok": true }))
         }
         "test" => {
-            let target: RemoteHost = serde_json::from_value(body.get("host").cloned().unwrap_or(json!({})))?;
-            test_target(target, password(&body)?, trusted(&body)).await?;
-            Ok(json!({ "ok": true }))
+            // The editor submits an unsaved host (hostname/user/port only), so a
+            // full RemoteHost parse would fail; accept the partial form instead.
+            let input: TestHostInput = serde_json::from_value(body.get("host").cloned().unwrap_or(json!({})))?;
+            crate::debuglog::log(&format!("api: machines.test host={:?} user={:?} port={:?} password={} trustedPrompt={}", input.hostname, input.user, input.port, body.get("password").is_some(), body.get("trustedPrompt").is_some()));
+            let target = RemoteHost {
+                id: input.hostname.clone(),
+                name: input.hostname.clone(),
+                hostname: input.hostname,
+                user: input.user.filter(|user| !user.is_empty()),
+                port: input.port,
+                identity_file: None,
+                source: "test".into(),
+                visible: None,
+                connected: None,
+            };
+            match test_target(target, password(&body)?, trusted(&body)).await {
+                Ok(()) => {
+                    crate::debuglog::log("api: machines.test OK");
+                    Ok(json!({ "ok": true }))
+                }
+                Err(error) => {
+                    crate::debuglog::log_error("api: machines.test FAILED", &error);
+                    Err(error)
+                }
+            }
         }
         "local-folder" => {
             let locale = body.get("locale").and_then(|v| v.as_str()).map(|s| s.to_string());
@@ -520,9 +594,25 @@ async fn machine_action_inner(state: &AppState, body: Value) -> AppResult<Value>
         }
         "test-host" | "connect" => {
             let host = body.get("host").and_then(|v| v.as_str()).ok_or_else(|| AppError::machine("HOST_INVALID"))?;
-            connect_host(host, password(&body)?, trusted(&body)).await?;
+            crate::debuglog::log(&format!("api: machines.{action} host={host:?} password={} trustedPrompt={}", body.get("password").is_some(), body.get("trustedPrompt").is_some()));
+            match connect_host(host, password(&body)?, trusted(&body)).await {
+                Ok(()) => crate::debuglog::log(&format!("api: machines.{action} connect OK host={host:?}")),
+                Err(error) => {
+                    crate::debuglog::log_error(&format!("api: machines.{action} connect FAILED host={host:?}"), &error);
+                    return Err(error);
+                }
+            }
             if action == "connect" {
-                let cwd = String::from_utf8_lossy(&ssh_exec(host, r#"printf "%s" "$HOME""#).await?).into_owned();
+                let cwd = match ssh_exec(host, r#"printf "%s" "$HOME""#).await {
+                    Ok(bytes) => {
+                        crate::debuglog::log(&format!("api: machines.connect home={:?}", String::from_utf8_lossy(&bytes)));
+                        String::from_utf8_lossy(&bytes).into_owned()
+                    }
+                    Err(error) => {
+                        crate::debuglog::log_error(&format!("api: machines.connect home lookup FAILED host={host:?}"), &error);
+                        return Err(error);
+                    }
+                };
                 return Ok(json!({ "cwd": cwd }));
             }
             Ok(json!({ "ok": true }))
@@ -605,6 +695,12 @@ async fn create_terminal(State(state): State<AppState>, Json(body): Json<Value>)
 }
 
 fn create_terminal_inner(state: &AppState, body: &Value) -> AppResult<String> {
+    crate::debuglog::log(&format!(
+        "api: terminal create request cwd={:?} sshHost={:?} id={:?}",
+        body.get("cwd").and_then(|v| v.as_str()).unwrap_or(""),
+        body.get("sshHost").and_then(|v| v.as_str()),
+        body.get("id").and_then(|v| v.as_str())
+    ));
     if let Some(id) = body.get("id") {
         let Some(id) = id.as_str() else {
             return Err(AppError::msg("Invalid terminal id"));
@@ -617,14 +713,71 @@ fn create_terminal_inner(state: &AppState, body: &Value) -> AppResult<String> {
     if cwd.is_empty() {
         return Err(AppError::msg("cwd required"));
     }
-    let cwd = resolve_terminal_cwd(cwd);
-    if !cwd.is_dir() {
-        return Err(AppError::msg("cwd must be a directory"));
-    }
     let cols = json_dimension(body.get("cols")).unwrap_or(80);
     let rows = json_dimension(body.get("rows")).unwrap_or(24);
     let id = body.get("id").and_then(|v| v.as_str()).map(str::to_string);
-    state.terminals.create_shell(cwd.to_string_lossy().into_owned(), cols, rows, id)
+    match terminal_target(cwd, terminal_ssh_host(body)?)? {
+        TerminalTarget::Local(cwd) => {
+            crate::debuglog::log(&format!("api: terminal create -> LOCAL shell in {}", cwd.display()));
+            state.terminals.create_shell(cwd.to_string_lossy().into_owned(), cols, rows, id)
+        }
+        TerminalTarget::Remote { host, directory } => {
+            crate::debuglog::log(&format!("api: terminal create -> REMOTE shell host={host:?} dir={directory:?}"));
+            state.terminals.create_remote_shell(directory, cols, rows, id, host)
+        }
+    }
+}
+
+/// Where a new terminal runs.
+enum TerminalTarget {
+    Local(PathBuf),
+    /// `directory` is an absolute path on `host`, not on this machine.
+    Remote { host: String, directory: String },
+}
+
+/// The SSH host a terminal-create request asks for, if it asks for one.
+fn terminal_ssh_host(body: &Value) -> AppResult<Option<String>> {
+    let host = body.get("sshHost").and_then(|v| v.as_str()).unwrap_or("").trim();
+    if host.is_empty() {
+        return Ok(None);
+    }
+    if !valid_ssh_host(host) {
+        return Err(AppError::msg("请输入 SSH 主机别名或 user@host"));
+    }
+    Ok(Some(host.to_string()))
+}
+
+/// Resolve a create request against the machine the terminal will actually run
+/// on.
+///
+/// A remote directory is deliberately not checked with `is_dir()`: the path
+/// belongs to the other machine, and on Windows a POSIX path like `/srv/app` is
+/// not even absolute, so the check would answer about the wrong filesystem —
+/// and answer no.
+fn terminal_target(cwd: &str, host: Option<String>) -> AppResult<TerminalTarget> {
+    match host {
+        None => {
+            let cwd = resolve_terminal_cwd(cwd);
+            if !cwd.is_dir() {
+                return Err(AppError::msg("cwd must be a directory"));
+            }
+            Ok(TerminalTarget::Local(cwd))
+        }
+        Some(host) => {
+            if !cwd.starts_with('/') {
+                return Err(AppError::msg("SSH 工作目录请使用绝对路径"));
+            }
+            Ok(TerminalTarget::Remote { host, directory: cwd.to_string() })
+        }
+    }
+}
+
+/// An SSH host alias or `user@host`. The value goes to ssh config resolution
+/// rather than to a shell, but the workspace editor and the terminal API share
+/// one rule so neither can accept a value the other rejects.
+fn valid_ssh_host(host: &str) -> bool {
+    static HOST: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    HOST.get_or_init(|| regex::Regex::new(r"^[a-zA-Z0-9][a-zA-Z0-9._@:-]*$").expect("host pattern")).is_match(host)
 }
 
 fn resolve_terminal_cwd(cwd: &str) -> PathBuf {
@@ -823,5 +976,65 @@ pub fn build_state(resource_dir: Option<PathBuf>) -> AppState {
         bin_dir: resolve_bin_dir(resource_dir),
         default_cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
         launches: Arc::new(Mutex::new(HashSet::new())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn target(cwd: &str, body: Value) -> AppResult<TerminalTarget> {
+        terminal_target(cwd, terminal_ssh_host(&body)?)
+    }
+
+    #[test]
+    fn a_local_terminal_needs_a_real_directory() {
+        let dir = std::env::temp_dir().join("cue-terminal-target");
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let local = target(dir.to_str().expect("utf-8 path"), json!({})).expect("a real directory is accepted");
+        match local {
+            TerminalTarget::Local(cwd) => assert_eq!(cwd, dir),
+            TerminalTarget::Remote { .. } => panic!("no sshHost means a local terminal"),
+        }
+        let missing = dir.join("does-not-exist");
+        assert!(target(missing.to_str().expect("utf-8 path"), json!({})).is_err());
+    }
+
+    #[test]
+    fn an_ssh_terminal_takes_the_remote_path_verbatim() {
+        // The directory does not exist here, and on Windows `/srv/app` is not
+        // even absolute — resolving or stat-ing it would answer about the wrong
+        // machine, so anything other than passing it through is a regression.
+        let remote = target("/srv/app", json!({ "sshHost": "build-box" })).expect("a remote path is not a local path");
+        match remote {
+            TerminalTarget::Remote { host, directory } => {
+                assert_eq!(host, "build-box");
+                assert_eq!(directory, "/srv/app");
+            }
+            TerminalTarget::Local(_) => panic!("an sshHost means a remote terminal"),
+        }
+    }
+
+    #[test]
+    fn an_ssh_terminal_rejects_a_relative_directory() {
+        assert!(target("srv/app", json!({ "sshHost": "build-box" })).is_err());
+    }
+
+    #[test]
+    fn a_host_is_read_only_from_a_plausible_alias() {
+        assert!(matches!(terminal_ssh_host(&json!({})), Ok(None)));
+        assert!(matches!(terminal_ssh_host(&json!({ "sshHost": "   " })), Ok(None)));
+        assert_eq!(terminal_ssh_host(&json!({ "sshHost": "dev@example.com:2222" })).expect("a user@host alias").as_deref(), Some("dev@example.com:2222"));
+        assert!(terminal_ssh_host(&json!({ "sshHost": "-oProxyCommand=sh" })).is_err());
+        assert!(terminal_ssh_host(&json!({ "sshHost": "build box" })).is_err());
+    }
+
+    #[test]
+    fn the_workspace_editor_and_the_terminal_api_agree_on_hosts() {
+        for host in ["build-box", "dev@example.com", "h.example.com:2222", "_bad", "--flag", ""] {
+            let expected = regex::Regex::new(r"^[a-zA-Z0-9][a-zA-Z0-9._@:-]*$").expect("reference pattern").is_match(host);
+            assert_eq!(valid_ssh_host(host), expected, "disagreement on {host:?}");
+        }
     }
 }

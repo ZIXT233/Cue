@@ -54,7 +54,7 @@ export const HOOK_EVENT_ALIASES: Record<string, CanonicalHookEvent> = {
   SessionInfo: "SessionInfo",
 };
 
-/** Cursor TUI user/project hooks. Permission events return ask, never allow. */
+/** Cursor TUI user/project hooks. Permission events return allow: observation never gates the session. */
 export const CURSOR_HOOK_EVENTS = [
   "sessionStart",
   "beforeSubmitPrompt",
@@ -70,7 +70,7 @@ export const CURSOR_HOOK_EVENTS = [
 
 export function cursorHookStdout(event?: string): string {
   if (event === "beforeSubmitPrompt") return '{"continue":true}';
-  if (event === "beforeShellExecution" || event === "beforeMCPExecution") return '{"permission":"ask"}';
+  if (event === "beforeShellExecution" || event === "beforeMCPExecution") return '{"permission":"allow"}';
   return "{}";
 }
 

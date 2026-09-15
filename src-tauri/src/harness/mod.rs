@@ -36,8 +36,8 @@ use crate::live::LiveBus;
 use crate::models::{HarnessSession, QueueWorkspace};
 use crate::paths::signal_dir;
 use crate::settings::SettingsStore;
-use crate::ssh::{connection_args, ssh_login_command, ssh_login_exec};
-use crate::terminal::TerminalHub;
+use crate::ssh::{ssh_login_command, ssh_login_exec};
+use crate::terminal::{Spawn, TerminalHub};
 use crate::transcript::read_terminal_transcript;
 use notify_osc::{notify_osc_kinds, observe_notify, prefer_kitty_notifications, KittyNotifyProbe};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -184,18 +184,17 @@ impl HarnessRuntime {
         if resume.as_ref().is_some_and(|s| s.provider_session_id.is_none()) {
             return Err(AppError::msg("未捕获到原会话 ID，无法续接。请通过新会话入口创建新卡片。"));
         }
-        let executable;
-        let mut args: Vec<String>;
         let version;
         let mut env = HashMap::new();
         let mut shell_notifications = false;
+        // Filled in by whichever branch below applies. Remote sessions hand the
+        // whole login line to the SSH channel; local ones still need a pty.
+        let spawn;
 
         if adapter.id == "shell" {
             let shell = prepare_shell(workspace, &signals, bin_dir, settings.read()?.powershell_enabled).await?;
-            executable = shell.executable;
-            args = shell.args;
+            spawn = shell.spawn;
             version = shell.version;
-            env = shell.env;
             shell_notifications = shell.command_notifications;
         } else {
             let mut command_path = adapter.executable.to_string();
@@ -245,21 +244,24 @@ impl HarnessRuntime {
                     if exports.is_empty() { String::new() } else { format!("export {exports} && ") },
                     command
                 );
-                executable = "ssh".into();
-                args = connection_args(host, true).await?;
-                args.push(ssh_login_command(&remote));
-                env.clear();
+                spawn = Spawn::Remote { host: host.to_string(), command: ssh_login_command(&remote) };
             } else if cfg!(windows) {
                 let launch = windows_command(&command_path, &launch_args);
-                executable = launch.executable;
-                args = launch.args;
+                spawn = Spawn::Local { executable: launch.executable, args: launch.args, env };
             } else {
-                executable = command_path;
-                args = launch_args;
+                spawn = Spawn::Local { executable: command_path, args: launch_args, env };
             }
         }
 
         let kind = adapter.id.to_string();
+        crate::debuglog::log(&format!(
+            "harness: launch adapter={kind} workspace_kind={} spawn={}",
+            workspace.kind,
+            match &spawn {
+                Spawn::Local { executable, .. } => format!("LOCAL executable={executable:?}"),
+                Spawn::Remote { host, .. } => format!("REMOTE host={host:?}"),
+            }
+        ));
         self.probes.lock().insert(terminal_id.clone(), ProbeState {
             kind: Some(kind.clone()),
             remote: workspace.kind == "ssh",
@@ -447,9 +449,7 @@ impl HarnessRuntime {
             100,
             30,
             Some(terminal_id.clone()),
-            executable,
-            args,
-            env,
+            spawn,
             true,
             Some(on_output),
         )?;

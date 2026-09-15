@@ -101,7 +101,6 @@ export const zhCNLocale: LocalePlugin = {
     "queue.taskFiles": "文件",
     "queue.taskChanges": "改动",
     "queue.taskExport": "导出",
-    "queue.remoteToolsUnavailable": "远程文件、Git 和终端面板尚未接通。Agent 工具仍在远端执行。",
     "queue.sideTerminal": "展开侧边终端",
     "queue.resizeSideTerminal": "调整侧边终端宽度",
 
@@ -385,9 +384,6 @@ export const zhCNLocale: LocalePlugin = {
     "settings.chat": "对话",
     "settings.quoteSelection": "选中文字时显示提问浮窗",
     "settings.languageDescription": "选择整个界面使用的语言。",
-    "settings.shellTool": "Shell 工具",
-    "settings.shellToolDescription": "仅控制 Pi 模型执行命令的工具，不影响终端卡片。Windows 默认使用自带的 PowerShell；关闭后使用 Bash，需要先安装 Git for Windows。直接输入的 ! 和 !! 命令仍需要 Bash。更改后请重载已有会话。",
-    "settings.usePowerShell": "模型使用 PowerShell（Windows 默认）",
     "settings.projectRequired": "打开项目后才能配置此项",
     "auth.prompt": "登录后继续使用",
     "auth.password": "密码",

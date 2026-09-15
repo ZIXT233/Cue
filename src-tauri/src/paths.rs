@@ -15,6 +15,9 @@ pub fn queue_file() -> PathBuf {
 }
 
 pub fn remote_hosts_file() -> PathBuf {
+    if let Ok(path) = std::env::var("CUE_REMOTE_HOSTS") {
+        return PathBuf::from(path);
+    }
     data_dir().join("remote-hosts.json")
 }
 

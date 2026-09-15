@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "@/hooks/useI18n";
-import { machineErrorKey } from "@/lib/workspace-machine-errors";
+import { machineErrorText } from "@/lib/workspace-machine-errors";
 import { WorkspaceMachineIcon } from "./WorkspaceMachineIcon";
 
 type Challenge = { kind: "password" } | { kind: "trust"; prompt: string };
@@ -53,7 +53,7 @@ export function SshAuthChallenge({ challenge, hostName, busy, error, onCancel, o
   }}>
     <div className="machine-auth-heading"><WorkspaceMachineIcon name="lock" /><h3>{t(trust ? "machines.trustTitle" : "machines.authTitle")}</h3></div>
     <p className="machine-help">{hostName}</p>
-    {trust ? <><p className="machine-help">{t("machines.trustHint")}</p><pre>{challenge.prompt}</pre></> : <><label>{t("machines.password")}<input type="password" autoFocus autoComplete="off" required value={password} onChange={(event) => setPassword(event.target.value)} /></label><p className="machine-help">{t("machines.passwordHint")}</p>{error && <p className="machine-error" role="alert">{t(machineErrorKey(error))}</p>}</>}
+    {trust ? <><p className="machine-help">{t("machines.trustHint")}</p><pre>{challenge.prompt}</pre></> : <><label>{t("machines.password")}<input type="password" autoFocus autoComplete="off" required value={password} onChange={(event) => setPassword(event.target.value)} /></label><p className="machine-help">{t("machines.passwordHint")}</p>{error && <p className="machine-error" role="alert">{machineErrorText(error, t)}</p>}</>}
     <div className="machine-actions"><button autoFocus={trust} className="machine-button" type="button" disabled={busy} onClick={() => { setPassword(""); onCancel(); }}>{t("machines.cancel")}</button><button className="machine-button is-primary" type="submit" disabled={busy}>{t(busy ? "machines.connecting" : trust ? "machines.trust" : "machines.connect", { name: hostName })}</button></div>
   </form></div>, document.querySelector<HTMLElement>(".cq-shell") ?? document.body);
 }
@@ -71,7 +71,7 @@ export function SshConnectionWait({ hostName, busy, error, onCancel, onRetry }: 
     <div className="machine-connection-wait" role={error ? "alert" : "status"}>
       <span className="machine-symbol is-remote"><WorkspaceMachineIcon name="remote" size={24} /></span>
       <strong>{hostName}</strong>
-      <p>{busy ? t("machines.connecting", { name: hostName }) : t(machineErrorKey(error))}</p>
+      <p>{busy ? t("machines.connecting", { name: hostName }) : machineErrorText(error, t)}</p>
       <div className="machine-actions"><button className="machine-button" type="button" onClick={onCancel}>{t("machines.cancel")}</button>{!busy && <button className="machine-button is-primary" type="button" onClick={onRetry}>{t("machines.retry")}</button>}</div>
     </div>
   </section></div>, document.querySelector<HTMLElement>(".cq-shell") ?? document.body);

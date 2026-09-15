@@ -101,7 +101,6 @@ export const zhTWLocale: LocalePlugin = {
     "queue.taskFiles": "檔案",
     "queue.taskChanges": "變更",
     "queue.taskExport": "匯出",
-    "queue.remoteToolsUnavailable": "遠端檔案、Git 與終端面板尚未接通。Agent 工具仍在遠端執行。",
     "queue.sideTerminal": "展開側邊終端機",
     "queue.resizeSideTerminal": "調整側邊終端機寬度",
 
@@ -385,9 +384,6 @@ export const zhTWLocale: LocalePlugin = {
     "settings.chat": "對話",
     "settings.quoteSelection": "選取文字時顯示提問浮窗",
     "settings.languageDescription": "選擇整個介面使用的語言。",
-    "settings.shellTool": "Shell 工具",
-    "settings.shellToolDescription": "選擇模型執行命令時使用的 Shell。直接輸入的 ! 和 !! 命令仍使用 Bash。",
-    "settings.usePowerShell": "使用 PowerShell 取代 Bash",
     "settings.projectRequired": "開啟專案後才能設定此項",
     "auth.prompt": "登入後繼續使用",
     "auth.password": "密碼",

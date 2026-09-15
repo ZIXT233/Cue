@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties, type Reac
 import { useResizablePanel } from "@/hooks/useResizablePanel";
 import { RIGHT_PANEL_FALLBACK_WIDTH, RIGHT_PANEL_MIN_WIDTH, RIGHT_PANEL_MAX_WIDTH } from "@/lib/panel-layout";
 import { CardExtraTerminalPanes, TerminalTabBar, useCardExtraTerminals } from "./CardSideTerminal";
-import { persistCardSideTerminalOpen, type CardSideTerminalRef } from "@/lib/card-side-terminals";
+import { persistCardSideTerminalOpen, type CardSideTerminalRef, type RemoteShellTarget } from "@/lib/card-side-terminals";
 import type { SettingsSection } from "@/lib/settings-navigation";
 import { useI18n } from "@/hooks/useI18n";
 
@@ -19,12 +19,12 @@ export interface DetachedCardLayoutControls {
   toolsPanelTarget: HTMLElement | null;
 }
 
-export function DetachedCardTools({ children, cardId, cwd, remote, saved, savedOpen }: {
+export function DetachedCardTools({ children, cardId, cwd, remoteShell, saved, savedOpen }: {
   children: (controls: DetachedCardLayoutControls) => ReactNode;
   cardId: string;
   cwd: string;
   sessionId: string;
-  remote: boolean;
+  remoteShell?: RemoteShellTarget;
   saved?: CardSideTerminalRef[];
   savedOpen?: boolean;
   onSettings: (section: SettingsSection) => void;
@@ -32,7 +32,7 @@ export function DetachedCardTools({ children, cardId, cwd, remote, saved, savedO
   const { t } = useI18n();
   const [rightPanel, setRightPanel] = useState<"terminal" | "tools" | null>(savedOpen ? "terminal" : null);
   const [toolsPanelTarget, setToolsPanelTarget] = useState<HTMLDivElement | null>(null);
-  const extras = useCardExtraTerminals({ cardId, cwd, enabled: !remote, saved });
+  const extras = useCardExtraTerminals({ cardId, cwd, remoteShell, enabled: true, saved });
   const lastRightPanel = useRef<"terminal" | "tools">(savedOpen ? "terminal" : "terminal");
   const lastSavedOpen = useRef(!!savedOpen);
   // Echo guard: once the user toggles locally, our own persisted writes come
@@ -64,13 +64,13 @@ export function DetachedCardTools({ children, cardId, cwd, remote, saved, savedO
     });
   }, [savedOpen]);
   useEffect(() => {
-    if (rightPanel === "terminal" && !remote) extras.ensureTab();
-  }, [extras.ensureTab, remote, rightPanel]);
+    if (rightPanel === "terminal") extras.ensureTab();
+  }, [extras.ensureTab, rightPanel]);
   const setTerminalOpen = (open: boolean) => {
     userToggled.current = true;
     setRightPanel(open ? "terminal" : null);
     void persistCardSideTerminalOpen(cardId, open);
-    if (open && !remote) extras.ensureTab();
+    if (open) extras.ensureTab();
   };
   const selectTerminal = () => {
     setTerminalOpen(rightPanel !== "terminal");
@@ -88,7 +88,7 @@ export function DetachedCardTools({ children, cardId, cwd, remote, saved, savedO
     setRightPanel((current) => {
       const next = current ? null : lastRightPanel.current;
       void persistCardSideTerminalOpen(cardId, next === "terminal");
-      if (!remote && next === "terminal") extras.ensureTab();
+      if (next === "terminal") extras.ensureTab();
       return next;
     });
   }}><ToolIcon name="sidebarRight" /></button>;
@@ -108,22 +108,22 @@ export function DetachedCardTools({ children, cardId, cwd, remote, saved, savedO
               if (extras.tabs.filter((tab) => tab.id !== id).length === 0) setTerminalOpen(false);
             }}
             onAdd={() => extras.addTab()}
-            disabled={remote}
           />
         ) : <span>{t("queue.sessionTools")}</span>}
       </div>
       <div ref={setToolsPanelTarget} className="cq-task-tools-definitions" hidden={rightPanel !== "tools"} />
-      {rightPanel === "terminal" && (remote ? <p className="cq-task-unavailable">{t("queue.remoteToolsUnavailable")}</p> : (
+      {rightPanel === "terminal" && (
         <div className="cq-task-terminal">
           <CardExtraTerminalPanes
             tabs={extras.tabs}
             activeId={extras.activeId}
             active
+            remote={!!remoteShell}
             onRestart={extras.restartTab}
             onUnavailable={(id) => extras.dropTab(id)}
           />
         </div>
-      ))}
+      )}
     </div>
   </div>;
 }

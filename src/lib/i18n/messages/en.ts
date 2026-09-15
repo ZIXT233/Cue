@@ -101,7 +101,6 @@ export const enLocale: LocalePlugin = {
     "queue.taskFiles": "Files",
     "queue.taskChanges": "Changes",
     "queue.taskExport": "Export",
-    "queue.remoteToolsUnavailable": "Remote file, Git and terminal panels are not connected yet. Agent tools still run on the remote machine.",
     "queue.sideTerminal": "Open side terminal",
     "queue.resizeSideTerminal": "Resize side terminal",
 
@@ -385,9 +384,6 @@ export const enLocale: LocalePlugin = {
     "settings.chat": "Chat",
     "settings.quoteSelection": "Show actions for selected text",
     "settings.languageDescription": "Choose the language used throughout the interface.",
-    "settings.shellTool": "Shell tool",
-    "settings.shellToolDescription": "Choose which shell the model uses for commands. Direct ! and !! commands still use Bash.",
-    "settings.usePowerShell": "Use PowerShell instead of Bash",
     "settings.projectRequired": "Open a project to configure this section",
     "auth.prompt": "Sign in to continue",
     "auth.password": "Password",

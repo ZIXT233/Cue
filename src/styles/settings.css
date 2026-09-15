@@ -1177,21 +1177,6 @@ html.dark .settings-dialog-surface {
   font-size: 10px;
 }
 
-.settings-shell-option {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  width: 100%;
-  max-width: 420px;
-  min-height: 44px;
-  padding: 0 10px;
-  border-radius: 9px;
-  background: var(--bg-panel);
-  color: var(--text);
-  font-size: 12px;
-}
-
 .settings-general-error {
   margin: 8px 0 0;
   color: #ef4444;

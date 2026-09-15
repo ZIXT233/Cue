@@ -18,7 +18,6 @@ import {
   CHAT_CONTENT_FONT_SIZE_MIN,
   useChatAppearance,
 } from "@/hooks/useChatAppearance";
-import type { ShellToolSettingsResponse } from "@/lib/api-types";
 import { setLastSettingsSection, type SettingsSection } from "@/lib/settings-navigation";
 import { RemoteHostsSettings } from "./RemoteHostsSettings";
 import { ConfigButton, ConfigSwitch } from "./SettingsUi";
@@ -59,42 +58,6 @@ function GeneralSettings() {
   const { mode: attentionMode, setMode: setAttentionMode } = useAttentionMode();
   const { mode: submissionBehavior, setMode: setSubmissionBehavior } = useSubmissionBehavior();
   const { fontSize, setFontSize } = useChatAppearance();
-  const [shellSettings, setShellSettings] = useState<ShellToolSettingsResponse | null>(null);
-  const [shellSaving, setShellSaving] = useState(false);
-  const [shellError, setShellError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void fetch("/api/tools/settings")
-      .then(async (response) => {
-        const data = await response.json() as ShellToolSettingsResponse & { error?: string };
-        if (!response.ok || data.error) throw new Error(data.error ?? `HTTP ${response.status}`);
-        if (!cancelled) setShellSettings(data);
-      })
-      .catch((cause) => {
-        if (!cancelled) setShellError(cause instanceof Error ? cause.message : String(cause));
-      });
-    return () => { cancelled = true; };
-  }, []);
-
-  const togglePowerShell = async (enabled: boolean) => {
-    setShellSaving(true);
-    setShellError(null);
-    try {
-      const response = await fetch("/api/tools/settings", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled }),
-      });
-      const data = await response.json() as ShellToolSettingsResponse & { error?: string };
-      if (!response.ok || data.error) throw new Error(data.error ?? `HTTP ${response.status}`);
-      setShellSettings(data);
-    } catch (cause) {
-      setShellError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setShellSaving(false);
-    }
-  };
 
   return (
     <div className="settings-general">
@@ -229,23 +192,6 @@ function GeneralSettings() {
           </div>
         </div>
       </section>
-
-      {shellSettings?.isWindows && (
-        <section className="settings-general-section">
-          <h3 className="settings-general-heading">{t("settings.shellTool")}</h3>
-          <p className="settings-general-description">{t("settings.shellToolDescription")}</p>
-          <div className="settings-shell-option">
-            <span>{t("settings.usePowerShell")}</span>
-            <ConfigSwitch
-              checked={shellSettings.powerShellEnabled}
-              loading={shellSaving}
-              label={t("settings.usePowerShell")}
-              onChange={(enabled) => void togglePowerShell(enabled)}
-            />
-          </div>
-          {shellError && <p role="alert" className="settings-general-error">{shellError}</p>}
-        </section>
-      )}
 
       <section className="settings-general-section">
         <h3 className="settings-general-heading">{t("common.language")}</h3>

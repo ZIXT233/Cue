@@ -219,6 +219,10 @@ pub struct RemoteHost {
     pub user: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
+    /// `IdentityFile` read out of `~/.ssh/config`. Cue talks the SSH protocol
+    /// itself now, so it has to find the key the user's config points at.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_file: Option<String>,
     pub source: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visible: Option<bool>,

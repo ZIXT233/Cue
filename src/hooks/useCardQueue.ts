@@ -64,8 +64,8 @@ export function useCardQueue() {
     const response = await fetch("/api/card-queue", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ...data }),
     });
-    const result = await readJsonResponse<CardQueue & { error?: string }>(response);
-    if (!response.ok) throw new Error(result.error || "操作失败");
+    const result = await readJsonResponse<CardQueue & { error?: string; code?: string; prompt?: string; detail?: string }>(response);
+    if (!response.ok) throw Object.assign(new Error(result.error || "操作失败"), { code: result.code, prompt: result.prompt, detail: result.detail });
     if (mounted.current && owner === lifetime.current) {
       if (generation === localGeneration.current) accept(result);
       else void refresh();

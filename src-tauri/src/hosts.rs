@@ -145,6 +145,7 @@ fn read_config(path: PathBuf, seen: &mut HashSet<PathBuf>) -> AppResult<Vec<Remo
                         hostname: name.clone(),
                         user: None,
                         port: None,
+                        identity_file: None,
                         source: "config".into(),
                         visible: None,
                         connected: None,
@@ -162,6 +163,16 @@ fn read_config(path: PathBuf, seen: &mut HashSet<PathBuf>) -> AppResult<Vec<Remo
         } else if directive == "port" {
             if let Some(value) = words.get(1).and_then(|s| s.parse().ok()) {
                 for index in &active { hosts[*index].port = Some(value); }
+            }
+        } else if directive == "identityfile" {
+            // First one wins, matching OpenSSH's behaviour of keeping the
+            // earliest `IdentityFile` for a host block.
+            if let Some(value) = words.get(1) {
+                for index in &active {
+                    if hosts[*index].identity_file.is_none() {
+                        hosts[*index].identity_file = Some(value.clone());
+                    }
+                }
             }
         } else if directive == "include" {
             for pattern in words.iter().skip(1) {
@@ -210,4 +221,28 @@ fn user_ok(value: &str) -> bool {
 
 pub fn saved_host(id: &str) -> AppResult<Option<RemoteHost>> {
     Ok(saved_hosts()?.into_iter().find(|h| h.id == id))
+}
+
+/// Look a host id up in the saved hosts, then in `~/.ssh/config`.
+///
+/// `saved_host` alone is not enough any more: Cue resolves connection
+/// parameters itself instead of leaving it to the `ssh` binary, so it needs the
+/// full alias table — including each entry's `IdentityFile`.
+pub fn resolve(id: &str) -> AppResult<Option<RemoteHost>> {
+    if let Some(host) = saved_host(id)? {
+        return Ok(Some(host));
+    }
+    Ok(config_hosts()?.into_iter().find(|host| host.id == id))
+}
+
+/// The `IdentityFile` `~/.ssh/config` associates with an alias, if any.
+///
+/// A saved host carries no identity file of its own, but its hostname may still
+/// be an alias in the config, so callers check both.
+pub fn identity_file(alias: &str) -> Option<String> {
+    config_hosts()
+        .ok()?
+        .into_iter()
+        .find(|host| host.id == alias)
+        .and_then(|host| host.identity_file)
 }

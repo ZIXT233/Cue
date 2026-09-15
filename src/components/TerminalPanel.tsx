@@ -44,7 +44,7 @@ function liveThemeProfile(themeProfile: TerminalThemeProfile | undefined, remote
 
 export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, onUnavailable, embedded = false, readOnly = false, onStatusChange, onOutput, themeProfile, remote = false, focusReporting = false, inQueue = false, conptyCursorHide = true }: Props) {
   const { t } = useI18n();
-  const { id, cwd, restored } = tab;
+  const { id, cwd, sshHost, restored } = tab;
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const startRef = useRef<Promise<void>>(Promise.resolve());
@@ -460,7 +460,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
         await terminalRequest("/api/terminal", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id, cwd, cols: terminal.cols, rows: terminal.rows }),
+          body: JSON.stringify({ id, cwd, cols: terminal.cols, rows: terminal.rows, ...(sshHost ? { sshHost } : {}) }),
         });
       }
       connect();
@@ -524,7 +524,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       terminal.dispose();
       terminalRef.current = null;
     };
-  }, [id, cwd, restored, reconnectKey, readOnly, themeProfile, remote]);
+  }, [id, cwd, sshHost, restored, reconnectKey, readOnly, themeProfile, remote]);
 
   useEffect(() => { liveControlRef.current?.(active); }, [active]);
 

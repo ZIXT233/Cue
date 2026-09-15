@@ -4,10 +4,13 @@ const registry = new Map<string, string[]>();
 
 export type CardSideTerminalRef = { id: string; cwd: string };
 
-export function sideTerminalsFromCard(saved: CardSideTerminalRef[] | undefined, cwd: string): TerminalTab[] {
+/** Where the side terminals of a card run when its workspace is an SSH host. */
+export type RemoteShellTarget = { host: string; cwd: string };
+
+export function sideTerminalsFromCard(saved: CardSideTerminalRef[] | undefined, cwd: string, sshHost?: string): TerminalTab[] {
   return (saved ?? [])
     .filter((tab) => /^[a-f0-9]{32}$/.test(tab.id))
-    .map((tab) => ({ id: tab.id, cwd: tab.cwd.trim() || cwd, restored: true }));
+    .map((tab) => ({ id: tab.id, cwd: tab.cwd.trim() || cwd, restored: true, ...(sshHost ? { sshHost } : {}) }));
 }
 
 export function rememberCardSideTerminals(cardId: string, tabIds: string[]) {

@@ -6,13 +6,16 @@ import { createPortal } from "react-dom";
 import { useI18n } from "@/hooks/useI18n";
 import { ProviderIcon } from "./ProviderIcon";
 import { TerminalPanel, type TerminalConnectionStatus } from "./TerminalPanel";
+import { SshAuthChallenge, useSshAuthChallenge } from "./SshAuthChallenge";
+import { machineRequest } from "./RemoteHostsSettings";
+import { needsSshSecret } from "@/lib/workspace-machine-errors";
 import { ErrorDialog } from "./ErrorDialog";
 import { HarnessDebugPanel } from "./HarnessDebugPanel";
 import { developerProbesEnabled } from "@/lib/developer-probes";
 import type { QueueCard } from "@/lib/card-queue";
 
-export function HarnessCard({ card, active, inQueue = false, children, onAction, onStartAll }: {
-  card: QueueCard; active: boolean; inQueue?: boolean; children?: ReactNode;
+export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostName, children, onAction, onStartAll }: {
+  card: QueueCard; active: boolean; inQueue?: boolean; sshHost?: string; sshHostName?: string; children?: ReactNode;
   onAction: (action: string, data: Record<string, unknown>) => Promise<boolean>;
   onStartAll?: () => Promise<void>;
 }) {
@@ -24,6 +27,10 @@ export function HarnessCard({ card, active, inQueue = false, children, onAction,
   const [mode] = useState<"cli">("cli");
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
+  const auth = useSshAuthChallenge();
+  const [pendingAction, setPendingAction] = useState<{ action: string; data: Record<string, unknown> } | null>(null);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState<unknown>(null);
   const [terminalStatus, setTerminalStatus] = useState<TerminalConnectionStatus>("connecting");
   const [connection, setConnection] = useState(0);
   const [showTranscript, setShowTranscript] = useState(false);
@@ -91,8 +98,31 @@ export function HarnessCard({ card, active, inQueue = false, children, onAction,
     setBusy(true);
     setActionError("");
     try { await onAction(action, { id: card.id, ...data }); }
-    catch (error) { setActionError(error instanceof Error ? error.message : String(error)); }
+    catch (error) {
+      // The SSH layer is asking for a secret, not failing: put up the auth
+      // dialog, remember what the user was trying to do, and replay it once
+      // the connection is in. Everything else stays a plain message.
+      if (sshHost && needsSshSecret(error)) { setPendingAction({ action, data }); setAuthError(null); auth.present(error); }
+      else setActionError(error instanceof Error ? error.message : String(error));
+    }
     finally { setBusy(false); }
+  };
+
+  const retryWithSecret = async (secret?: string, trustedPrompt?: string) => {
+    if (!pendingAction || !sshHost) return;
+    setAuthBusy(true);
+    setAuthError(null);
+    try {
+      await machineRequest({ action: "connect", host: sshHost, ...(trustedPrompt !== undefined ? { trustedPrompt } : {}), ...(secret !== undefined ? { password: secret } : {}) });
+      auth.clear();
+      const pending = pendingAction;
+      setPendingAction(null);
+      await act(pending.action, pending.data);
+    }
+    catch (error) {
+      if (!auth.present(error)) setAuthError(error);
+    }
+    finally { setAuthBusy(false); }
   };
 
   const controls = fresh ? null : harness ? <div className="cq-harness-controls">
@@ -105,6 +135,7 @@ export function HarnessCard({ card, active, inQueue = false, children, onAction,
 
   return <>
     {actionError && <ErrorDialog message={actionError} onDismiss={() => setActionError("")} />}
+    {sshHost && <SshAuthChallenge challenge={auth.challenge} hostName={sshHostName || sshHost} busy={authBusy} error={authError} onCancel={() => { auth.clear(); setPendingAction(null); setAuthError(null); }} onRetry={(password, trustedPrompt) => void retryWithSecret(password, trustedPrompt)} />}
     {developerProbes && showDebug && harness && <HarnessDebugPanel terminalId={harness.terminalId} onClose={() => setShowDebug(false)} />}
     {fresh ? active && switchPosition && createPortal(<div className="cq-harness-floating" style={switchPosition}>{controls}</div>, document.body) : target && controls && createPortal(controls, target)}
     {harness ? <div className="cq-harness-body" data-harness={harness.kind} data-disconnected={disconnected && !showTranscript ? "true" : undefined}>

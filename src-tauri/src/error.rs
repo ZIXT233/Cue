@@ -8,7 +8,7 @@ pub enum AppError {
     #[error("{0}")]
     Message(String),
     #[error("{code}")]
-    Machine { code: String, prompt: Option<String> },
+    Machine { code: String, prompt: Option<String>, detail: Option<String> },
 }
 
 impl AppError {
@@ -17,7 +17,14 @@ impl AppError {
     }
 
     pub fn machine(code: impl Into<String>) -> Self {
-        Self::Machine { code: code.into(), prompt: None }
+        Self::Machine { code: code.into(), prompt: None, detail: None }
+    }
+
+    /// A machine code plus the original remote text. The code routes the UI
+    /// (auth challenges, localized fallbacks); the detail is what the user
+    /// actually reads — without it every failure looks the same.
+    pub fn machine_detail(code: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self::Machine { code: code.into(), prompt: None, detail: Some(detail.into()) }
     }
 }
 
@@ -37,10 +44,13 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         match self {
             Self::Message(message) => (StatusCode::BAD_REQUEST, Json(json!({ "error": message }))).into_response(),
-            Self::Machine { code, prompt } => {
+            Self::Machine { code, prompt, detail } => {
                 let mut body = json!({ "error": code, "code": code });
                 if let Some(prompt) = prompt {
                     body["prompt"] = json!(prompt);
+                }
+                if let Some(detail) = detail {
+                    body["detail"] = json!(detail);
                 }
                 (StatusCode::BAD_REQUEST, Json(body)).into_response()
             }

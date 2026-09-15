@@ -1,16 +1,21 @@
 use crate::error::AppResult;
 use crate::models::QueueWorkspace;
 use crate::paths::signal_dir;
-use crate::ssh::{connection_args, shell_quote, ssh_exec};
+use crate::ssh::{shell_quote, ssh_exec};
+use crate::terminal::Spawn;
 use std::collections::HashMap;
 use std::path::Path;
 
 pub struct ShellLaunch {
-    pub executable: String,
-    pub args: Vec<String>,
-    pub env: HashMap<String, String>,
+    pub spawn: Spawn,
     pub version: String,
     pub command_notifications: bool,
+}
+
+/// Remote (ssh) paths must always use forward slashes; joining PathBuf on
+/// Windows injects backslashes that break remote mkdir/cd commands.
+fn forward(p: &Path) -> String {
+    p.to_string_lossy().replace('\\', "/")
 }
 
 pub async fn prepare_shell(workspace: &QueueWorkspace, directory: &Path, bin_dir: &Path, powershell: bool) -> AppResult<ShellLaunch> {
@@ -55,16 +60,17 @@ pub async fn prepare_shell(workspace: &QueueWorkspace, directory: &Path, bin_dir
     } else if name == "bash" {
         let integration = std::fs::read_to_string(bin_dir.join("shell/bash-integration.sh"))?;
         files.insert("bashrc".into(), format!("[[ -r \"$HOME/.bashrc\" ]] && source \"$HOME/.bashrc\"\n{integration}"));
-        args = vec!["--rcfile".into(), root.join("bashrc").to_string_lossy().into_owned(), "-i".into()];
+        let rcfile = if remote { format!("{}/bashrc", forward(&root)) } else { root.join("bashrc").to_string_lossy().into_owned() };
+        args = vec!["--rcfile".into(), rcfile, "-i".into()];
     } else {
         args = vec!["-il".into()];
         command_notifications = false;
     }
     if remote {
         let host = workspace.ssh_host.as_deref().unwrap();
-        ssh_exec(host, &format!("umask 077; mkdir -p {}", shell_quote(&root.to_string_lossy()))).await?;
+        ssh_exec(host, &format!("umask 077; mkdir -p {}", shell_quote(&forward(&root)))).await?;
         for (name, body) in &files {
-            ssh_exec(host, &format!("printf %s {} > {}", shell_quote(body), shell_quote(&root.join(name).to_string_lossy()))).await?;
+            ssh_exec(host, &format!("printf %s {} > {}", shell_quote(body), shell_quote(&format!("{}/{}", forward(&root), name)))).await?;
         }
         let exports = env.iter().map(|(k, v)| format!("{k}={}", shell_quote(v))).collect::<Vec<_>>().join(" ");
         let command = std::iter::once(shell.clone()).chain(args).map(|s| shell_quote(&s)).collect::<Vec<_>>().join(" ");
@@ -74,9 +80,9 @@ pub async fn prepare_shell(workspace: &QueueWorkspace, directory: &Path, bin_dir
             if exports.is_empty() { String::new() } else { format!("export {exports} && ") },
             command
         );
-        let mut ssh_args = connection_args(host, true).await?;
-        ssh_args.push(remote_cmd);
-        return Ok(ShellLaunch { executable: "ssh".into(), args: ssh_args, env: HashMap::new(), version: String::new(), command_notifications });
+        // The remote side's sshd allocates the pty for this command; there is no
+        // local ssh process and therefore no local pty to go with it.
+        return Ok(ShellLaunch { spawn: Spawn::Remote { host: host.to_string(), command: remote_cmd }, version: String::new(), command_notifications });
     }
     if !files.is_empty() {
         std::fs::create_dir_all(&root)?;
@@ -85,7 +91,7 @@ pub async fn prepare_shell(workspace: &QueueWorkspace, directory: &Path, bin_dir
         }
     }
     let _ = signal_dir("unused");
-    Ok(ShellLaunch { executable: shell, args, env, version: String::new(), command_notifications })
+    Ok(ShellLaunch { spawn: Spawn::Local { executable: shell, args, env }, version: String::new(), command_notifications })
 }
 
 pub fn probe_chunk(data: &str) -> Option<(bool, Option<i32>)> {

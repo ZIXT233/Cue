@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { clearEnsuringSideTerminal, dropCardSideTerminal, peekEnsuringSideTerminal, persistCardSideTerminal, persistCardSideTerminalOpen, rememberCardSideTerminals, rememberEnsuringSideTerminal, sideTerminalsFromCard, type CardSideTerminalRef } from "@/lib/card-side-terminals";
+import { clearEnsuringSideTerminal, dropCardSideTerminal, peekEnsuringSideTerminal, persistCardSideTerminal, persistCardSideTerminalOpen, rememberCardSideTerminals, rememberEnsuringSideTerminal, sideTerminalsFromCard, type CardSideTerminalRef, type RemoteShellTarget } from "@/lib/card-side-terminals";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
 import { useI18n } from "@/hooks/useI18n";
 import { TerminalPanel } from "./TerminalPanel";
@@ -14,24 +14,31 @@ const DEFAULT_WIDTH = 380;
 export function useCardExtraTerminals({
   cardId,
   cwd,
+  remoteShell,
   enabled,
   saved,
 }: {
   cardId: string;
   cwd: string;
+  remoteShell?: RemoteShellTarget;
   enabled: boolean;
   saved?: CardSideTerminalRef[];
 }) {
+  // A remote card's terminal belongs to the workspace's machine, so both the
+  // starting directory and the host come from there — never from `cwd`, which is
+  // the card's *local* runtime directory on a remote workspace.
+  const baseCwd = remoteShell?.cwd ?? cwd;
+  const sshHost = remoteShell?.host;
   const dropped = useRef(new Set<string>());
-  const [tabs, setTabs] = useState<TerminalTab[]>(() => sideTerminalsFromCard(saved, cwd));
-  const [activeId, setActiveId] = useState<string | null>(() => sideTerminalsFromCard(saved, cwd)[0]?.id ?? peekEnsuringSideTerminal(cardId)?.id ?? null);
+  const [tabs, setTabs] = useState<TerminalTab[]>(() => sideTerminalsFromCard(saved, baseCwd, sshHost));
+  const [activeId, setActiveId] = useState<string | null>(() => sideTerminalsFromCard(saved, baseCwd, sshHost)[0]?.id ?? peekEnsuringSideTerminal(cardId)?.id ?? null);
   const savedKey = (saved ?? []).map((tab) => tab.id).join(",");
 
   useEffect(() => {
     for (const id of [...dropped.current]) {
       if (!(saved ?? []).some((tab) => tab.id === id)) dropped.current.delete(id);
     }
-    const incoming = sideTerminalsFromCard(saved, cwd).filter((tab) => !dropped.current.has(tab.id));
+    const incoming = sideTerminalsFromCard(saved, baseCwd, sshHost).filter((tab) => !dropped.current.has(tab.id));
     setTabs((current) => {
       const incomingIds = new Set(incoming.map((tab) => tab.id));
       const optimistic = current.filter((tab) => !incomingIds.has(tab.id) && !tab.restored && !dropped.current.has(tab.id));
@@ -47,13 +54,13 @@ export function useCardExtraTerminals({
     if (incoming.some((tab) => tab.id === peekEnsuringSideTerminal(cardId)?.id)) {
       clearEnsuringSideTerminal(cardId);
     }
-  }, [cardId, cwd, saved, savedKey]);
+  }, [cardId, baseCwd, sshHost, saved, savedKey]);
 
   useEffect(() => {
     if (enabled) rememberCardSideTerminals(cardId, tabs.map((tab) => tab.id));
   }, [cardId, enabled, tabs]);
 
-  const dropTab = useCallback((id: string, nextCwd = cwd) => {
+  const dropTab = useCallback((id: string, nextCwd = baseCwd) => {
     dropped.current.add(id);
     dropCardSideTerminal(cardId, { id, cwd: nextCwd });
     setTabs((current) => {
@@ -61,23 +68,23 @@ export function useCardExtraTerminals({
       setActiveId((active) => active === id ? remaining.at(-1)?.id ?? null : active);
       return remaining;
     });
-  }, [cardId, cwd]);
+  }, [cardId, baseCwd]);
 
   const addTab = useCallback(() => {
     if (!enabled) return null;
-    const tab = newTerminalTab(cwd);
+    const tab = newTerminalTab(baseCwd, sshHost);
     dropped.current.delete(tab.id);
     setTabs((current) => [...current, tab]);
     setActiveId(tab.id);
     void persistCardSideTerminal(cardId, tab, "add");
     return tab;
-  }, [cardId, cwd, enabled]);
+  }, [cardId, baseCwd, sshHost, enabled]);
 
   const ensureTab = useCallback(() => {
     if (!enabled) return;
     setTabs((current) => {
       if (current.length > 0) return current;
-      const incoming = sideTerminalsFromCard(saved, cwd).filter((tab) => !dropped.current.has(tab.id));
+      const incoming = sideTerminalsFromCard(saved, baseCwd, sshHost).filter((tab) => !dropped.current.has(tab.id));
       if (incoming.length > 0) {
         setActiveId(incoming[0].id);
         return incoming;
@@ -87,13 +94,13 @@ export function useCardExtraTerminals({
         setActiveId(pending.id);
         return [pending];
       }
-      const tab = newTerminalTab(cwd);
+      const tab = newTerminalTab(baseCwd, sshHost);
       rememberEnsuringSideTerminal(cardId, tab);
       setActiveId(tab.id);
       void persistCardSideTerminal(cardId, tab, "add");
       return [tab];
     });
-  }, [cardId, cwd, enabled, saved]);
+  }, [cardId, baseCwd, sshHost, enabled, saved]);
 
   const closeTab = useCallback((id: string) => {
     const tab = tabs.find((item) => item.id === id);
@@ -170,12 +177,14 @@ export function CardExtraTerminalPanes({
   tabs,
   activeId,
   active,
+  remote,
   onRestart,
   onUnavailable,
 }: {
   tabs: TerminalTab[];
   activeId: string | null;
   active: boolean;
+  remote?: boolean;
   onRestart: (id: string) => void;
   onUnavailable: (id: string) => void;
 }) {
@@ -183,6 +192,7 @@ export function CardExtraTerminalPanes({
     <div key={tab.id} className="cq-side-terminal-body" hidden={tab.id !== activeId}>
       <TerminalPanel
         embedded
+        remote={remote}
         tab={tab}
         active={active && tab.id === activeId}
         onRestart={() => onRestart(tab.id)}
@@ -197,7 +207,7 @@ export function CardExtraTerminalPanes({
 export function CardSideTerminal({
   cardId,
   cwd,
-  remote,
+  remoteShell,
   active,
   enabled,
   saved,
@@ -206,21 +216,21 @@ export function CardSideTerminal({
 }: {
   cardId: string;
   cwd: string;
-  remote: boolean;
+  remoteShell?: RemoteShellTarget;
   active: boolean;
   enabled: boolean;
   saved?: CardSideTerminalRef[];
   savedOpen?: boolean;
   children: (ui: { button: ReactNode; panel: ReactNode }) => ReactNode;
 }) {
-  const ui = useCardSideTerminal({ cardId, cwd, remote, active, enabled, saved, savedOpen });
+  const ui = useCardSideTerminal({ cardId, cwd, remoteShell, active, enabled, saved, savedOpen });
   return children(ui);
 }
 
 function useCardSideTerminal({
   cardId,
   cwd,
-  remote,
+  remoteShell,
   active,
   enabled,
   saved,
@@ -228,14 +238,14 @@ function useCardSideTerminal({
 }: {
   cardId: string;
   cwd: string;
-  remote: boolean;
+  remoteShell?: RemoteShellTarget;
   active: boolean;
   enabled: boolean;
   saved?: CardSideTerminalRef[];
   savedOpen?: boolean;
 }) {
   const { t } = useI18n();
-  const extras = useCardExtraTerminals({ cardId, cwd, enabled, saved });
+  const extras = useCardExtraTerminals({ cardId, cwd, remoteShell, enabled, saved });
   const [open, setOpen] = useState(!!savedOpen);
   const lastSavedOpen = useRef(!!savedOpen);
   // Echo guard: after a local toggle, our own persisted writes come back as
@@ -249,8 +259,8 @@ function useCardSideTerminal({
     setOpen(!!savedOpen);
   }, [savedOpen]);
   useEffect(() => {
-    if (open && !remote) extras.ensureTab();
-  }, [open, remote, extras.ensureTab]);
+    if (open) extras.ensureTab();
+  }, [open, extras.ensureTab]);
   const widthRef = useRef(DEFAULT_WIDTH);
   const maxWidth = useCallback(() => {
     if (typeof window === "undefined") return MAX_WIDTH;
@@ -276,7 +286,6 @@ function useCardSideTerminal({
   };
 
   const toggle = () => {
-    if (remote) return;
     setPanelOpen(!open);
   };
 
@@ -287,9 +296,8 @@ function useCardSideTerminal({
 
   const button = enabled ? (
     <SideTerminalButton
-      disabled={remote}
       pressed={open}
-      label={remote ? t("queue.remoteToolsUnavailable") : t("queue.sideTerminal")}
+      label={t("queue.sideTerminal")}
       onClick={toggle}
     />
   ) : null;
@@ -311,13 +319,13 @@ function useCardSideTerminal({
             onSelect={extras.setActiveId}
             onClose={closeTab}
             onAdd={() => extras.addTab()}
-            disabled={remote}
           />
         </div>
         <CardExtraTerminalPanes
           tabs={extras.tabs}
           activeId={extras.activeId}
           active={active && open}
+          remote={!!remoteShell}
           onRestart={extras.restartTab}
           onUnavailable={(id) => extras.dropTab(id)}
         />

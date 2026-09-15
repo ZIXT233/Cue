@@ -1,15 +1,17 @@
 export interface TerminalTab {
   id: string;
   cwd: string;
+  /** Set when this tab runs on an SSH host; `cwd` is then a path on that host. */
+  sshHost?: string;
   restored?: boolean;
   closing?: "close" | "restart";
 }
 
 export const TERMINAL_TABS_KEY = "pi-web:terminal-tabs";
 
-export function newTerminalTab(cwd: string): TerminalTab {
+export function newTerminalTab(cwd: string, sshHost?: string): TerminalTab {
   const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
-  return { id, cwd };
+  return sshHost ? { id, cwd, sshHost } : { id, cwd };
 }
 
 export function restoreTerminalTabs(raw: string | null): { tabs: TerminalTab[]; activeId: string | null; open: boolean } {
