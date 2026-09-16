@@ -27,15 +27,15 @@ Claude Code、CodeBuddy、Codex、Cursor、Antigravity、Gemini、Grok、OpenCod
 
 | Harness | 消息发送 | 普通回复 | ask | perm | resume 同步 | 标题 |
 | --- | --- | --- | --- | --- | --- | --- |
-| Codex | 正常 | 正常 | 正常 | 正常 | 正常 | 事件时读session文件：thread_name → 会话第一条prompt → hook最后一次prompt → Codex · 工作区 |
-| Claude Code | 正常 | 正常 | 正常 | 正常 | | custom-title → 会话第一条prompt → hook最后一次prompt → Claude Code · 工作区 |
-| CodeBuddy | | | | | | custom-title → ai-title → topic → 会话第一条prompt → hook最后一次prompt → CodeBuddy · 工作区 |
-| Cursor | 正常 | 正常 | 正常 | 正常 | 通过 | 事件时读session文件：meta.title → prompt_history首条 → hook最后一次prompt → Cursor Agent · 工作区 |
-| Pi | 正常 | 正常 | 正常 | 正常 | 正常 | 事件时读session文件：session_info.name → 会话第一条prompt → hook最后一次prompt → Pi CLI · 工作区 |
-| OMP | 正常 | 正常 | 正常 | 正常 | 正常 | 事件时读session文件：title → session_info.name → 会话第一条prompt → hook最后一次prompt → Oh My Pi · 工作区 |
-| Grok | 正常 | 正常 | 正常 | 正常 | 正常 | 事件时读session文件：summary.generated_title → 会话第一条prompt → hook最后一次prompt → Grok Build · 工作区 |
-| Antigravity | | | | | | 无稳定session文件：hook最后一次prompt → Antigravity CLI · 工作区 |
-| OpenCode | 正常 | 正常 | 正常 | 正常 | 正常 | 稳定OSC info.title（过滤 New session 默认值）→ hook首条prompt → hook最后一次prompt → OpenCode · 工作区 |
+| Codex | 正常 | 正常 | 正常 | 正常 | 正常 | thread_name |
+| Claude Code | 正常 | 正常 | 正常 | 正常 | 正常 | custom-title 或 会话第一条prompt |
+| CodeBuddy | 正常 | 正常 | 正常 | 正常 | 正常 | custom-title 或 ai-title |
+| Cursor | 正常 | 正常 | 正常 | 正常 | 通过 | meta.title |
+| Pi | 正常 | 正常 | 正常 | 正常 | 正常 | session_info.name |
+| OMP | 正常 | 正常 | 正常 | 正常 | 正常 | title |
+| Grok | 正常 | 正常 | 正常 | 正常 | 正常 | generated_title |
+| Antigravity | 正常 | 正常 | 正常 | 正常 | 正常 | hook最后一次prompt |
+| OpenCode | 正常 | 正常 | 正常 | 正常 | 正常 | OSC info.title |
 | Shell | | | | | | 工作区名 |
 
 ### 外部Agent会话捕捉

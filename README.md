@@ -27,15 +27,15 @@ Claude Code, CodeBuddy, Codex, Cursor, Antigravity, Gemini, Grok, OpenCode, Pi /
 
 | Harness | Message send | Normal reply | Ask | Permission | Resume sync | Title |
 | --- | --- | --- | --- | --- | --- | --- |
-| Codex | OK | OK | OK | OK | OK | thread_name → first session prompt → last hooked prompt → Codex · workspace |
-| Claude Code | OK | OK | OK | OK | | custom-title → first session prompt → last hooked prompt → Claude Code · workspace |
-| CodeBuddy | | | | | | custom-title → ai-title → topic → first session prompt → last hooked prompt → CodeBuddy · workspace |
-| Cursor | OK | OK | OK | OK | pass | meta.title → first prompt-history entry → last hooked prompt → Cursor Agent · workspace |
-| Pi | OK | OK | OK | OK | OK | session_info.name → first session prompt → last hooked prompt → Pi CLI · workspace |
-| OMP | OK | OK | OK | OK | OK | title → session_info.name → first session prompt → last hooked prompt → Oh My Pi · workspace |
-| Grok | OK | OK | OK | OK | OK | summary.generated_title → first session prompt → last hooked prompt → Grok Build · workspace |
-| Antigravity | | | | | | last hooked prompt → Antigravity CLI · workspace |
-| OpenCode | OK | OK | OK | OK | OK | OSC info.title (default "New session" filtered) → first hooked prompt → last hooked prompt → OpenCode · workspace |
+| Codex | OK | OK | OK | OK | OK | thread_name |
+| Claude Code | OK | OK | OK | OK | OK | custom title or first session prompt |
+| CodeBuddy | OK | OK | OK | OK | OK | custom title or ai-title |
+| Cursor | OK | OK | OK | OK | pass | meta.title |
+| Pi | OK | OK | OK | OK | OK | session_info.name |
+| OMP | OK | OK | OK | OK | OK | title |
+| Grok | OK | OK | OK | OK | OK | generated_title |
+| Antigravity | OK | OK | OK | OK | OK | last hooked prompt |
+| OpenCode | OK | OK | OK | OK | OK | OSC info.title |
 | Shell | | | | | | workspace name |
 
 ### External agent session capture
