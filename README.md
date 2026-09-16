@@ -10,14 +10,14 @@ Que supports mainstream CLI harnesses through terminal cards, so you can handle 
 
 ## How it works
 
-### A queue of cards, weighted your way
+### Pending-reply card queue
 
-- Every session is a card with live state. Sessions that are working are not in the queue — the queue is exactly the cards waiting on you.
-- You decide the order: weighted score or FIFO. Not your turn yet? Remind-later parks the card and it comes back on its own.
+- One card per session with live state. Working sessions are not in the queue — the queue is exactly the cards waiting for a reply.
+- Two sort modes: score (wait minutes + card weight + tag bonuses) or FIFO; the Urgent Call tag sorts first. Remind-later parks a card and it re-enters on its own.
 - Finish one, the next steps up. Archive finished work, pop a running session out into its own window.
 - When a session needs you, a desktop notification takes you straight to its card.
 
-### Works with the CLI harnesses you already use
+### Multi-CLI harness response support
 
 Claude Code, CodeBuddy, Codex, Cursor, Antigravity, Gemini, Grok, OpenCode, Pi / OMP — plus a plain shell card for everything else.
 
@@ -38,11 +38,11 @@ Claude Code, CodeBuddy, Codex, Cursor, Antigravity, Gemini, Grok, OpenCode, Pi /
 | OpenCode | OK | OK | OK | OK | OK | OSC info.title (default "New session" filtered) → first hooked prompt → last hooked prompt → OpenCode · workspace |
 | Shell | | | | | | workspace name |
 
-### Catches the sessions it didn't start
+### External agent session capture
 
 IDE chats and plain terminals run the same harnesses. With the user-level hooks installed, Que captures those asks too and shows them as notice cards in the same deck — with the project, the question, and the conversation so far. They disappear when the session goes back to work, and each harness's capture can be toggled in settings.
 
-### Remote workspaces
+### Remote workspace support
 
 - Save an SSH host once and pick a directory on it — cards, live state and notifications work exactly like local.
 - The remote machine needs the harness CLI and Node.js 22+ installed.
