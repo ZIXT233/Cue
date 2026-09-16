@@ -13,7 +13,7 @@ Que supports mainstream CLI harnesses through terminal cards, so you can handle 
 ### Pending-reply card queue
 
 - One card per session with live state. Working sessions are not in the queue — the queue is exactly the cards waiting for a reply.
-- Two sort modes: score (wait minutes + card weight + tag bonuses) or FIFO; the Urgent Call tag sorts first. Remind-later parks a card and it re-enters on its own.
+- Two sort modes: score (wait minutes + card weight) or FIFO; urgent calls sort first. Remind-later parks a card and it re-enters on its own.
 - Finish one, the next steps up. Archive finished work, pop a running session out into its own window.
 - When a session needs you, a desktop notification takes you straight to its card.
 
@@ -45,8 +45,6 @@ IDE chats and plain terminals run the same harnesses. With the user-level hooks 
 ### Remote workspace support
 
 - Save an SSH host once and pick a directory on it — cards, live state and notifications work exactly like local.
-- The remote machine needs the harness CLI and Node.js 22+ installed.
-- Both are checked before a card opens, so a missing dependency is a clear error message instead of a dead terminal you have to diagnose yourself.
 
 ## Development
 
