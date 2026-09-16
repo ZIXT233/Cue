@@ -277,7 +277,7 @@ function useCardSideTerminal({
     growthDirection: "left",
     maxWidth: MAX_WIDTH,
     minWidth: MIN_WIDTH,
-    storageKey: "cue:card-side-terminal-width",
+    storageKey: "que:card-side-terminal-width",
     widthRef,
   });
 

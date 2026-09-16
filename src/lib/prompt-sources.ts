@@ -1,4 +1,4 @@
-export const PROMPT_SOURCES_ENTRY = "cue:prompt-sources";
+export const PROMPT_SOURCES_ENTRY = "que:prompt-sources";
 export interface PromptSourcesConfig {
   basePrompt: string;
   excludedContextFiles: string[];

@@ -1,5 +1,5 @@
-export const ATTENTION_MODE_KEY = "cue:attention-mode";
-export const ATTENTION_MODE_CHANGED = "cue:attention-mode-changed";
+export const ATTENTION_MODE_KEY = "que:attention-mode";
+export const ATTENTION_MODE_CHANGED = "que:attention-mode-changed";
 
 export const ATTENTION_MODES = [
   { id: "daily", icon: "◇", label: "queue.日常模式" },

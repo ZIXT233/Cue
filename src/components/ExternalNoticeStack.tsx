@@ -67,7 +67,7 @@ function ExternalHarnessHeaderBadge({ kind, title }: { kind: string; title: stri
 }
 
 /**
- * A card for an attention call from a session Cue never launched. Cursor's user-level
+ * A card for an attention call from a session Que never launched. Cursor's user-level
  * hooks are global, so IDE chats and other terminals report here too. It rides the
  * deck like any other card, so it reuses the queue card's shell, header, chips and
  * actions; the body is the only thing it owns, because there is no terminal behind it

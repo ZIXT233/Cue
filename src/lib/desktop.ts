@@ -1,4 +1,4 @@
-export interface CueDesktop {
+export interface QueDesktop {
   storage?: Pick<Storage, "getItem" | "setItem" | "removeItem">;
   platform?: string;
   writeClipboardText?: (text: string) => Promise<boolean | void> | boolean | void;
@@ -13,11 +13,11 @@ export interface CueDesktop {
 
 declare global {
   interface Window {
-    cueDesktop?: CueDesktop;
-    __CUE_API_BASE__?: string;
+    queDesktop?: QueDesktop;
+    __QUE_API_BASE__?: string;
   }
 }
 
-export function desktopBridge(): CueDesktop | undefined {
-  return window.cueDesktop;
+export function desktopBridge(): QueDesktop | undefined {
+  return window.queDesktop;
 }

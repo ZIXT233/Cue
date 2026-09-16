@@ -1,166 +1,61 @@
-# Cue
+# Que
 
-[English](README.md) | **简体中文**
+**English** | [简体中文](README.zh-CN.md)
 
 **让 Agent 排队找你**
 
-Cue 通过统一的待处理 Agent 会话队列调度你的注意力，让你只需处理队首，而不用追着通知小红点跑。
+Que 通过统一的待处理 Agent 会话队列调度你的注意力，让你只需处理队首，而不用追着通知小红点跑。
 
-Cue 通过终端卡片支持主流 CLI Harness，让你可以在同一个地方处理多个 Harness 工作流。
+Que 通过终端卡片支持主流 CLI Harness，让你可以在同一个地方处理多个 Harness 工作流。
 
-## 技术栈
+## 工作流
 
-- 前端：Vite + React
-- 桌面：Tauri 2
-- 后端：Rust（队列、PTY、Harness hooks/OSC、工作区、SSH）
+### 卡片队列，权重你说了算
 
-## 环境要求
+- 每个会话一张卡片，状态实时更新。正在干活的卡片不占队列——队里排的就是在等你的。
+- 顺序你定：按权重评分排，或按先进先出；还没轮到的「稍后提醒」，到点自己回队。
+- 处理完一张，下一张顶上；干完的归档，跑着的可以拆成独立窗口盯着。
+- 会话需要你时弹桌面通知，点一下直接跳到那张卡片。
 
-- [Node.js](https://nodejs.org/) 18+
-- npm（随 Node.js 安装）
-- [Rust](https://www.rust-lang.org/tools/install) stable（`rustup`）
-- Tauri 2 各平台工具链：见 [Prerequisites](https://v2.tauri.app/start/prerequisites/)
-  - macOS：Xcode Command Line Tools
-  - Windows：Visual Studio C++ 工作负载 + WebView2
-  - Linux：`webkit2gtk` 以及其余 Tauri 系统依赖
+### 支持你已经在用的 CLI Harness
 
-```bash
-node -v
-npm -v
-rustc -V
-cargo -V
-npx tauri --version
-```
+Claude Code、CodeBuddy、Codex、Cursor、Antigravity、Gemini、Grok、OpenCode、Pi / OMP，外加一张万能的 Shell 卡片。
 
-## 安装
+- 从卡片启动会话时自动完成接入，不需要你手动配 hook；你手写的配置条目永远不会被覆盖。
+- 卡片上显示真实的会话标题和提问内容，重开一张卡会自动接回原来的对话。
+- 各家 Harness 的实测状态（消息发送 / 普通回复 / ask / perm / resume 同步 / 标题来源）：
 
-```bash
-git clone https://github.com/ZIXT233/Cue.git
-cd Cue
-npm install
-```
+| Harness | 消息发送 | 普通回复 | ask | perm | resume 同步 | 标题 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Codex | 正常 | 正常 | 正常 | 正常 | 正常 | 事件时读session文件：thread_name → 会话第一条prompt → hook最后一次prompt → Codex · 工作区 |
+| Claude Code | 正常 | 正常 | 正常 | 正常 | | custom-title → 会话第一条prompt → hook最后一次prompt → Claude Code · 工作区 |
+| CodeBuddy | | | | | | custom-title → ai-title → topic → 会话第一条prompt → hook最后一次prompt → CodeBuddy · 工作区 |
+| Cursor | 正常 | 正常 | 正常 | 正常 | 通过 | 事件时读session文件：meta.title → prompt_history首条 → hook最后一次prompt → Cursor Agent · 工作区 |
+| Pi | 正常 | 正常 | 正常 | 正常 | 正常 | 事件时读session文件：session_info.name → 会话第一条prompt → hook最后一次prompt → Pi CLI · 工作区 |
+| OMP | 正常 | 正常 | 正常 | 正常 | 正常 | 事件时读session文件：title → session_info.name → 会话第一条prompt → hook最后一次prompt → Oh My Pi · 工作区 |
+| Grok | 正常 | 正常 | 正常 | 正常 | 正常 | 事件时读session文件：summary.generated_title → 会话第一条prompt → hook最后一次prompt → Grok Build · 工作区 |
+| Antigravity | | | | | | 无稳定session文件：hook最后一次prompt → Antigravity CLI · 工作区 |
+| OpenCode | 正常 | 正常 | 正常 | 正常 | 正常 | 稳定OSC info.title（过滤 New session 默认值）→ hook首条prompt → hook最后一次prompt → OpenCode · 工作区 |
+| Shell | | | | | | 工作区名 |
 
-首次跑 `tauri` / `cargo` 时会下载 Rust 依赖（`src-tauri/`）。
+### 抓住不是从 Que 启动的会话
+
+IDE 聊天窗口、裸终端里跑的同一批 Harness 也会向你要注意力。装好用户级 hook 后，Que 会把这些询问一并抓进来：以通知卡的形式出现在同一个牌堆里，带着项目名、问题和到目前为止的对话，会话回到工作状态时自动消失；每一家的外部抓取都可以在设置里单独开关。
+
+### 远程工作区
+
+- SSH 主机保存一次，选中上面的一个目录，之后卡片、状态、通知和本地完全一致。
+- 远程机器上需要装好要用的 CLI 和 Node.js 22+。
+- 启动卡片前会自动检查 CLI 和 Node 是否就位，缺了直接告诉你缺什么，不会开出一张死终端让你自己猜。
 
 ## 开发
 
-桌面端（先起 Vite，端口 `1420`，再开 Tauri 窗口）：
+环境要求：Node.js 22+、Rust 工具链，以及你所在平台的 [Tauri 2 依赖](https://v2.tauri.app/start/prerequisites/)。
 
 ```bash
-npm run tauri dev
+npm install
+npm run tauri dev     # 跑桌面端
+npm run tauri build   # 打当前平台的安装包
 ```
 
-只跑前端（浏览器，没有 Rust / PTY / 桌面 API）：
-
-```bash
-npm run dev
-```
-
-类型检查：
-
-```bash
-npx tsc --noEmit
-```
-
-环境诊断：
-
-```bash
-npx tauri info
-```
-
-## 构建
-
-### 前端
-
-```bash
-npm run build
-```
-
-实际执行 `tsc && vite build`。产物在 `dist/`。
-
-预览生产前端：
-
-```bash
-npm run preview
-```
-
-### 桌面端
-
-当前平台的 Release 包（会先跑 `npm run build`）：
-
-```bash
-npm run tauri build
-```
-
-Debug 桌面包（更快、体积更大、带调试符号）：
-
-```bash
-npm run tauri -- build --debug
-```
-
-### 安装包
-
-`src-tauri/tauri.conf.json` 里 `targets` 默认是当前系统的 `all`。
-
-```bash
-# macOS
-npm run tauri -- build --bundles app
-npm run tauri -- build --bundles dmg
-
-# Windows
-npm run tauri -- build --bundles nsis
-npm run tauri -- build --bundles msi
-
-# Linux
-npm run tauri -- build --bundles deb
-npm run tauri -- build --bundles rpm
-npm run tauri -- build --bundles appimage
-```
-
-macOS 通用二进制（Apple Silicon + Intel）：
-
-```bash
-rustup target add aarch64-apple-darwin x86_64-apple-darwin
-npm run tauri -- build --target universal-apple-darwin
-```
-
-### 只编 Rust
-
-不会打出可安装的应用包。
-
-```bash
-cd src-tauri
-cargo check
-cargo build
-cargo build --release
-```
-
-### 图标
-
-从源标重新生成各平台图标：
-
-```bash
-npx tauri icon src-tauri/icons/cue-mark.svg
-```
-
-安装包里的 Dock / 开始菜单图标需要重新打桌面包（或重装）。`tauri dev` 可能继续用缓存图标。
-
-## 产物位置
-
-| 类型 | 路径 |
-| --- | --- |
-| 前端 | `dist/` |
-| Rust 二进制 | `src-tauri/target/release/cue` |
-| macOS app | `src-tauri/target/release/bundle/macos/Cue.app` |
-| macOS dmg | `src-tauri/target/release/bundle/dmg/` |
-| Windows | `src-tauri/target/release/bundle/nsis/`、`msi/` |
-| Linux | `src-tauri/target/release/bundle/deb/`、`rpm/`、`appimage/` |
-| Debug 包 | `src-tauri/target/debug/bundle/` |
-
-`node_modules/`、`dist/`、`src-tauri/target/` 已加入 gitignore。
-
-## 说明
-
-应用数据在 `~/.cue`。
-
-Harness hook 环境变量为 `CUE_HARNESS_*`，OSC 回传标记为 `\x1b]777;cue;…`。
+应用数据在 `~/.que`。协议细节与调试指南：[docs/harness/hook-api.zh-CN.md](docs/harness/hook-api.zh-CN.md)。

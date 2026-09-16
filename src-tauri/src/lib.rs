@@ -74,7 +74,7 @@ pub fn run() {
     tauri::Builder::default()
         // Must be the first plugin registered: a second launch hands its argv to the
         // running instance and exits, instead of spawning a rival process that would
-        // race on ~/.cue/queue.json, settings.json and the terminal registry.
+        // race on ~/.que/queue.json, settings.json and the terminal registry.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
@@ -91,7 +91,7 @@ pub fn run() {
             crate::debuglog::info(
                 "app",
                 &format!(
-                    "cue {} {} log={} level={}",
+                    "que {} {} log={} level={}",
                     env!("CARGO_PKG_VERSION"),
                     std::env::consts::OS,
                     crate::debuglog::log_path().display(),
@@ -120,7 +120,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![api_base, open_devtools, reveal_log, notify::send_completion_notification, notify::open_notification_settings])
         .build(tauri::generate_context!())
-        .expect("error while building Cue")
+        .expect("error while building Que")
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::Exit) {
                 if let Some(hub) = app.try_state::<crate::terminal::TerminalHub>() {

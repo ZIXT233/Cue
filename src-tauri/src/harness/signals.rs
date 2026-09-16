@@ -28,9 +28,9 @@ pub struct HookSignal {
     /// paused mid-turn. Reported as the fact it is — the ingress does not rename the
     /// event into a different one to carry it.
     pub fully_idle: Option<bool>,
-    /// Cold-start workspace reported by a global (non-Cue) hook.
+    /// Cold-start workspace reported by a global (non-Que) hook.
     pub workspace_root: Option<String>,
-    /// Set by the ingress when the emitting process carried no Cue channel: the event
+    /// Set by the ingress when the emitting process carried no Que channel: the event
     /// belongs to an external session, not to a queue card.
     pub external: Option<bool>,
 }
@@ -114,7 +114,7 @@ pub enum Meaning {
 
 /// A tool start whose gate the CLI owns, so the ask is only a guess.
 ///
-/// Cursor answers its own permission hooks on Cue's behalf (the ingress returns
+/// Cursor answers its own permission hooks on Que's behalf (the ingress returns
 /// `allow`), and Antigravity has no permission event at all, so in neither case does
 /// the payload say whether the user was asked — every tool call fires these. They are
 /// held for [`HELD_ATTENTION_MS`] instead of raised. Which events count is declared by
@@ -320,7 +320,7 @@ mod tests {
     }
 
     /// The translation table is the whole contract: one row per thing a harness can say,
-    /// and the conclusion Cue draws from it. Nothing downstream reads an event name.
+    /// and the conclusion Que draws from it. Nothing downstream reads an event name.
     #[test]
     fn every_event_lands_on_one_conclusion() {
         let cases = [

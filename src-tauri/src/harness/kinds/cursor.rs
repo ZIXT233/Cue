@@ -4,7 +4,7 @@
 //! the CLI waits for, and its kind is baked into every command so a foreign IDE session
 //! — which inherits neither the channel nor the signal dir — still answers correctly.
 //!
-//! Its user-level `hooks.json` is shared with hooks the user wrote, so Cue merges into it
+//! Its user-level `hooks.json` is shared with hooks the user wrote, so Que merges into it
 //! and only ever replaces entries it can prove are its own.
 
 use super::registry::{resume_flag, Adapter, Ctx, GlobalCtx, Harness, LaunchTweaks, Plan, UserMerge};
@@ -28,15 +28,15 @@ const EVENTS: &[&str] = &[
     "beforeShellExecution", "beforeMCPExecution", "afterAgentResponse", "stop", "sessionEnd",
 ];
 
-/// Merges Cue's entries into `~/.cursor/hooks.json` on a remote host, keeping foreign
+/// Merges Que's entries into `~/.cursor/hooks.json` on a remote host, keeping foreign
 /// ones. Mirrors `merge_user_hooks`.
-const SSH_MERGE: &str = r#"const fs=require("node:fs"),p=require("node:path"),dest=process.argv[1],src=process.argv[2],hook=process.argv[3];const owned=c=>{if(typeof c!=="string")return false;if(c.includes(hook))return true;const m=c.match(/-EncodedCommand\s+(\S+)/);if(m){try{const s=Buffer.from(m[1],"base64").toString("utf16le");if(s.includes(hook)||/[\\/](?:harness-plugins[\\/]cursor|\.cache[\\/]cue[\\/]harness)[\\/].*hook\.cjs/.test(s))return true;}catch{}}return /[\\/](?:harness-plugins[\\/]cursor|\.cache[\\/]cue[\\/]harness)[\\/].*hook\.cjs/.test(c)};const incoming=JSON.parse(fs.readFileSync(src,"utf8"));let x=fs.existsSync(dest)?JSON.parse(fs.readFileSync(dest,"utf8")):{};if(!x||Array.isArray(x)||typeof x!=="object")throw Error("Invalid Cursor hooks configuration");const hooks={...(x.hooks&&typeof x.hooks==="object"&&!Array.isArray(x.hooks)?x.hooks:{})};for(const [event,entries] of Object.entries(incoming.hooks||{})){const cur=Array.isArray(hooks[event])?hooks[event]:[];hooks[event]=[...cur.filter(e=>!owned(e&&e.command)),...entries];}x={...x,version:1,hooks};fs.mkdirSync(p.dirname(dest),{recursive:true,mode:448});fs.writeFileSync(dest+".cue.tmp",JSON.stringify(x,null,2),{mode:384});fs.renameSync(dest+".cue.tmp",dest);"#;
+const SSH_MERGE: &str = r#"const fs=require("node:fs"),p=require("node:path"),dest=process.argv[1],src=process.argv[2],hook=process.argv[3];const owned=c=>{if(typeof c!=="string")return false;if(c.includes(hook))return true;const m=c.match(/-EncodedCommand\s+(\S+)/);if(m){try{const s=Buffer.from(m[1],"base64").toString("utf16le");if(s.includes(hook)||/[\\/](?:harness-plugins[\\/]cursor|\.cache[\\/]que[\\/]harness)[\\/].*hook\.cjs/.test(s))return true;}catch{}}return /[\\/](?:harness-plugins[\\/]cursor|\.cache[\\/]que[\\/]harness)[\\/].*hook\.cjs/.test(c)};const incoming=JSON.parse(fs.readFileSync(src,"utf8"));let x=fs.existsSync(dest)?JSON.parse(fs.readFileSync(dest,"utf8")):{};if(!x||Array.isArray(x)||typeof x!=="object")throw Error("Invalid Cursor hooks configuration");const hooks={...(x.hooks&&typeof x.hooks==="object"&&!Array.isArray(x.hooks)?x.hooks:{})};for(const [event,entries] of Object.entries(incoming.hooks||{})){const cur=Array.isArray(hooks[event])?hooks[event]:[];hooks[event]=[...cur.filter(e=>!owned(e&&e.command)),...entries];}x={...x,version:1,hooks};fs.mkdirSync(p.dirname(dest),{recursive:true,mode:448});fs.writeFileSync(dest+".que.tmp",JSON.stringify(x,null,2),{mode:384});fs.renameSync(dest+".que.tmp",dest);"#;
 
 async fn plan(ctx: Ctx<'_>, events: &'static [&'static str]) -> AppResult<Plan> {
     let mut plan = Plan::default();
     plan.files.insert(
         ".cursor-plugin/plugin.json".into(),
-        serde_json::json!({ "name": "cue-session-state", "version": "1.0.0", "description": "Report this Cue terminal's lifecycle" }).to_string(),
+        serde_json::json!({ "name": "que-session-state", "version": "1.0.0", "description": "Report this Que terminal's lifecycle" }).to_string(),
     );
     let mut hooks = serde_json::Map::new();
     for event in events {
@@ -64,7 +64,7 @@ async fn plan(ctx: Ctx<'_>, events: &'static [&'static str]) -> AppResult<Plan> 
     Ok(plan)
 }
 
-/// Local install of the shared `hooks.json`: merge Cue's entries in, keep foreign ones.
+/// Local install of the shared `hooks.json`: merge Que's entries in, keep foreign ones.
 fn merge_local(existing: Option<&str>, payload: &str, host: &Host) -> AppResult<String> {
     let existing: serde_json::Value = match existing {
         Some(raw) => serde_json::from_str(raw)?,
@@ -94,14 +94,14 @@ impl Harness for Cursor {
         Box::pin(plan(ctx, self.events()))
     }
 
-    /// What a Cursor session Cue never launched needs: its own ingress, plus entries in
+    /// What a Cursor session Que never launched needs: its own ingress, plus entries in
     /// the user-level `hooks.json` that IDE chats and plain terminals read from anywhere.
     fn global(&self, ctx: &GlobalCtx) {
         let _ = ctx.install_ingress("cursor");
         let hook_path = ctx.hook_path("cursor");
         let mut hooks = serde_json::Map::new();
         for &event in self.events() {
-            let cmd = format!("CUE_HARNESS_KIND=cursor {} \"{}\" {}", ctx.node, hook_path, event);
+            let cmd = format!("QUE_HARNESS_KIND=cursor {} \"{}\" {}", ctx.node, hook_path, event);
             hooks.insert(event.to_string(), serde_json::json!([{ "command": cmd, "timeout": 15 }]));
         }
         let path = user_hooks_path();
@@ -138,7 +138,7 @@ impl Harness for Cursor {
                 .collect::<Vec<_>>()
                 .join(" ");
         }
-        host.generic_hook_command_with_prefix(event, "CUE_HARNESS_KIND=cursor ")
+        host.generic_hook_command_with_prefix(event, "QUE_HARNESS_KIND=cursor ")
     }
 
     /// The remote sink has no card directory to report into, so its signals land under
@@ -552,7 +552,7 @@ fn external_turn(turn: &Turn) -> crate::models::ExternalTurn {
 }
 
 pub(crate) fn user_hooks_path() -> PathBuf {
-    if let Ok(path) = std::env::var("CUE_CURSOR_HOOKS") {
+    if let Ok(path) = std::env::var("QUE_CURSOR_HOOKS") {
         return PathBuf::from(path);
     }
     dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".cursor/hooks.json")
@@ -560,10 +560,10 @@ pub(crate) fn user_hooks_path() -> PathBuf {
 
 fn hook_pattern() -> &'static Regex {
     static PATTERN: OnceLock<Regex> = OnceLock::new();
-    PATTERN.get_or_init(|| Regex::new(r#"[\\/](?:harness-plugins[\\/]cursor|\.cache[\\/]cue[\\/]harness)[\\/].*hook\.cjs"#).unwrap())
+    PATTERN.get_or_init(|| Regex::new(r#"[\\/](?:harness-plugins[\\/]cursor|\.cache[\\/]que[\\/]harness)[\\/].*hook\.cjs"#).unwrap())
 }
 
-/// A command is Cue's when it names this hook, or when it carries a PowerShell
+/// A command is Que's when it names this hook, or when it carries a PowerShell
 /// `-EncodedCommand` that does.
 fn is_owned_command(command: &str, hook_path: &str) -> bool {
     let pattern = hook_pattern();
@@ -584,7 +584,7 @@ fn is_owned_command(command: &str, hook_path: &str) -> bool {
     script.contains(hook_path) || pattern.is_match(&script)
 }
 
-/// Keep every foreign entry, drop Cue's old ones, append the new ones.
+/// Keep every foreign entry, drop Que's old ones, append the new ones.
 fn merge_user_hooks(existing: serde_json::Value, incoming: &serde_json::Value, hook_path: &str) -> AppResult<serde_json::Value> {
     if !existing.is_null() && (existing.is_array() || !existing.is_object()) {
         return Err(AppError::machine_detail("HARNESS_HOOKS_INVALID", "cursor"));
@@ -618,19 +618,19 @@ mod tests {
 
     #[test]
     fn merge_keeps_foreign_and_replaces_owned() {
-        let hook = "/home/u/.cache/cue/harness/newtoken/hook.cjs";
+        let hook = "/home/u/.cache/que/harness/newtoken/hook.cjs";
         let existing = serde_json::json!({
             "version": 1,
             "hooks": {
                 "beforeSubmitPrompt": [
                     { "command": "echo foreign" },
-                    { "command": "/home/u/.cache/cue/harness/oldtoken/hook.cjs" }
+                    { "command": "/home/u/.cache/que/harness/oldtoken/hook.cjs" }
                 ]
             }
         });
         let incoming = serde_json::json!({
             "hooks": {
-                "beforeSubmitPrompt": [{ "command": format!("CUE_HARNESS_KIND=cursor /usr/bin/node {hook} beforeSubmitPrompt") }]
+                "beforeSubmitPrompt": [{ "command": format!("QUE_HARNESS_KIND=cursor /usr/bin/node {hook} beforeSubmitPrompt") }]
             }
         });
         let merged = merge_user_hooks(existing, &incoming, hook).unwrap();
@@ -642,7 +642,7 @@ mod tests {
             .collect();
         assert_eq!(commands, vec![
             "echo foreign",
-            "CUE_HARNESS_KIND=cursor /usr/bin/node /home/u/.cache/cue/harness/newtoken/hook.cjs beforeSubmitPrompt",
+            "QUE_HARNESS_KIND=cursor /usr/bin/node /home/u/.cache/que/harness/newtoken/hook.cjs beforeSubmitPrompt",
         ]);
     }
 
@@ -654,9 +654,9 @@ mod tests {
 
     #[test]
     fn meta_carries_title_and_workspace() {
-        let body = r#"{"schemaVersion":1,"title":"Test File Session","cwd":"/Users/u/Projects/cue"}"#;
+        let body = r#"{"schemaVersion":1,"title":"Test File Session","cwd":"/Users/u/Projects/que"}"#;
         assert_eq!(title_from_meta(body).as_deref(), Some("Test File Session"));
-        assert_eq!(meta_text(body, "cwd").as_deref(), Some("/Users/u/Projects/cue"));
+        assert_eq!(meta_text(body, "cwd").as_deref(), Some("/Users/u/Projects/que"));
         assert_eq!(meta_text(r#"{"title":"  "}"#, "title"), None);
     }
 
@@ -722,7 +722,7 @@ mod tests {
     fn direct_launch_resolves_newest_cursor_version() {
         let _orig = std::env::var_os("LOCALAPPDATA");
         unsafe { std::env::set_var("LOCALAPPDATA", r"C:\Users\tester\AppData\Local"); }
-        let root = std::env::temp_dir().join(format!("cue-cursor-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("que-cursor-{}", std::process::id()));
         let versions = root.join("versions");
         std::fs::create_dir_all(versions.join("2026.08.01-aaaa1111")).unwrap();
         std::fs::create_dir_all(versions.join("2026.09.10-bbbb2222")).unwrap();
@@ -747,7 +747,7 @@ mod tests {
     #[test]
     fn direct_launch_skips_non_shims_and_broken_layouts() {
         assert!(direct_node_launch(r"C:\tools\opencode.exe").is_none());
-        let root = std::env::temp_dir().join(format!("cue-cursor-empty-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("que-cursor-empty-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let shim = root.join("cursor-agent.cmd");
         std::fs::write(&shim, "").unwrap();

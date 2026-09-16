@@ -10,7 +10,7 @@
 use crate::error::{AppError, AppResult};
 use crate::models::RemoteHost;
 
-/// Whether Cue currently holds an authenticated connection to `host`.
+/// Whether Que currently holds an authenticated connection to `host`.
 pub async fn is_connected(host: &str) -> bool {
     crate::remote::is_connected(host).await
 }
@@ -83,7 +83,7 @@ pub async fn ssh_exec_stdin(host: &str, command: &str, stdin: &[u8]) -> AppResul
 /// A login shell may print a banner or MOTD before the command runs; the marker
 /// lets us drop everything up to the real output.
 pub async fn ssh_login_exec(host: &str, command: &str) -> AppResult<Vec<u8>> {
-    let marker = format!("__CUE_LOGIN_{}__", uuid::Uuid::new_v4());
+    let marker = format!("__QUE_LOGIN_{}__", uuid::Uuid::new_v4());
     let wrapped = ssh_login_command(&format!("printf '%s' {}; {}", shell_quote(&marker), command));
     let output = ssh_exec(host, &wrapped).await?;
     let start = output.windows(marker.len()).position(|w| w == marker.as_bytes()).ok_or_else(|| AppError::machine("REMOTE_SHELL_NO_OUTPUT"))?;

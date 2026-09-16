@@ -6,10 +6,10 @@ function currentUrl(): URL {
 
 function subscribe(onStoreChange: () => void) {
   window.addEventListener("popstate", onStoreChange);
-  window.addEventListener("cue:location", onStoreChange);
+  window.addEventListener("que:location", onStoreChange);
   return () => {
     window.removeEventListener("popstate", onStoreChange);
-    window.removeEventListener("cue:location", onStoreChange);
+    window.removeEventListener("que:location", onStoreChange);
   };
 }
 
@@ -26,12 +26,12 @@ export function useRouter() {
   const replace = useCallback((href: string) => {
     const next = new URL(href, window.location.href);
     window.history.replaceState({}, "", `${next.pathname}${next.search}${next.hash}`);
-    window.dispatchEvent(new Event("cue:location"));
+    window.dispatchEvent(new Event("que:location"));
   }, []);
   const push = useCallback((href: string) => {
     const next = new URL(href, window.location.href);
     window.history.pushState({}, "", `${next.pathname}${next.search}${next.hash}`);
-    window.dispatchEvent(new Event("cue:location"));
+    window.dispatchEvent(new Event("que:location"));
   }, []);
   return { replace, push };
 }

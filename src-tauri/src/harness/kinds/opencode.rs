@@ -50,7 +50,7 @@ impl Harness for OpenCode {
         Box::pin(plan(ctx))
     }
 
-    /// OpenCode has no hook files: a session Cue never launched only needs the plugin itself.
+    /// OpenCode has no hook files: a session Que never launched only needs the plugin itself.
     fn global(&self, ctx: &GlobalCtx) {
         let _ = ctx.install_plugin("opencode", "harness-opencode.mjs", "opencode-plugin.mjs");
     }

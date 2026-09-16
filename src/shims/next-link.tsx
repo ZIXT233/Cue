@@ -16,7 +16,7 @@ export default function Link({ href, children, onClick, ...props }: Props) {
         event.preventDefault();
         const next = new URL(href, window.location.href);
         window.history.pushState({}, "", `${next.pathname}${next.search}${next.hash}`);
-        window.dispatchEvent(new Event("cue:location"));
+        window.dispatchEvent(new Event("que:location"));
       }}
       {...props}
     >

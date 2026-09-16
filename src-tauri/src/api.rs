@@ -38,7 +38,7 @@ pub struct AppState {
     pub queue: Arc<QueueStore>,
     pub terminals: TerminalHub,
     pub harness: HarnessRuntime,
-    /// Attention notices from sessions Cue did not launch. Read-only overlay data:
+    /// Attention notices from sessions Que did not launch. Read-only overlay data:
     /// never part of the queue store, never persisted.
     pub external: ExternalRuntime,
     pub hosts: Arc<HostStore>,
@@ -514,7 +514,7 @@ fn apply_action(queue: &mut CardQueue, body: &Value, action: &str, state: &AppSt
             let open = body.get("open").and_then(|v| v.as_bool()).unwrap_or(false);
             card.side_terminal_open = open.then_some(true);
         }
-        "adopt" | "attach" | "prompt_sources" => return Err(AppError::msg("Cue 不托管 Pi 原生会话")),
+        "adopt" | "attach" | "prompt_sources" => return Err(AppError::msg("Que 不托管 Pi 原生会话")),
         _ => return Err(AppError::msg("未知队列操作")),
     }
     Ok(())
@@ -793,7 +793,7 @@ fn card_report_text(state: &AppState, card_id: Option<&str>, term_id: Option<&st
     let card = card_id.and_then(|id| {
         state.queue.read_snapshot().ok()?.cards.into_iter().find(|c| c.id == id)
     });
-    let mut out = String::from("# Cue card report\n");
+    let mut out = String::from("# Que card report\n");
     if let Some(card) = &card {
         out.push_str(&format!(
             "card={} phase={:?} workspace={:?} cwd={} detached={} archived={}\n",
@@ -1204,7 +1204,7 @@ mod tests {
 
     #[test]
     fn a_local_terminal_needs_a_real_directory() {
-        let dir = std::env::temp_dir().join("cue-terminal-target");
+        let dir = std::env::temp_dir().join("que-terminal-target");
         std::fs::create_dir_all(&dir).expect("temp dir");
         let local = target(dir.to_str().expect("utf-8 path"), json!({})).expect("a real directory is accepted");
         match local {

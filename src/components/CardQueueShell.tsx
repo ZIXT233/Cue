@@ -57,7 +57,7 @@ import type { RemoteHost } from "@/lib/remote-hosts";
 import type { SessionInfo } from "@/lib/types";
 
 const cardTitle = (card: QueueCard, workspaceName: string | undefined, fallback: string) => harnessCardTitle(card.harness, workspaceName, fallback);
-const URGENT_ALERTS_KEY = "cue:urgent-alerts";
+const URGENT_ALERTS_KEY = "que:urgent-alerts";
 const REMIND_OPTIONS = [
   { minutes: 15, labelKey: "queue.15分钟" },
   { minutes: 60, labelKey: "queue.1小时" },
@@ -201,8 +201,8 @@ export function CardQueueShell() {
     const controller = new AbortController();
     void refreshRemoteHosts(controller.signal);
     const refresh = () => void refreshRemoteHosts();
-    window.addEventListener("cue-remote-hosts-changed", refresh);
-    return () => { controller.abort(); window.removeEventListener("cue-remote-hosts-changed", refresh); };
+    window.addEventListener("que-remote-hosts-changed", refresh);
+    return () => { controller.abort(); window.removeEventListener("que-remote-hosts-changed", refresh); };
   }, [refreshRemoteHosts]);
   const cards = queue?.cards ?? [];
   useEffect(() => {
@@ -243,7 +243,7 @@ export function CardQueueShell() {
     workspace?.kind === "ssh" && workspace.sshHost ? { host: workspace.sshHost, cwd: workspace.cwd } : undefined;
   const displayProject = (card: QueueCard) => workspaceOf(card)?.name || projectOf(card.cwd);
   const working = cards.filter((card) => card.phase === "working" && !card.detached && !pendingDetach.has(card.id) && !card.harness?.setup);
-  // Sessions running outside Cue have no terminal to inspect, but they are still work
+  // Sessions running outside Que have no terminal to inspect, but they are still work
   // in the background, so the sidebar lists them beside the queue's own.
   const externalWorking = externalWorkingNotices(queue?.external);
   const archived = cards.filter((card) => card.archivedAt !== undefined).sort((a, b) => b.archivedAt! - a.archivedAt!);
@@ -313,7 +313,7 @@ export function CardQueueShell() {
     const list = queue ? sortedQueue(queue) : [];
     const queued = pendingDetach.size === 0 ? list : list.filter((card) => !pendingDetach.has(card.id));
     // External notices ride the same deck so they read as cards rather than banners.
-    // They land last: the scheduler ranks real work, and these are not work Cue owns.
+    // They land last: the scheduler ranks real work, and these are not work Que owns.
     return [...queued, ...externalQueueCards(queue?.external)];
   }, [queue, scoreTick, pendingDetach]);
   const deckIndex = resolveQueueFocus(ready, focus?.id ?? null, focus?.index ?? 0);
@@ -666,7 +666,7 @@ export function CardQueueShell() {
 
   useEffect(() => {
     if (!detachedId) return;
-    const desktopOwner = (window as Window & { cueDesktop?: { owner?: string } }).cueDesktop?.owner;
+    const desktopOwner = (window as Window & { queDesktop?: { owner?: string } }).queDesktop?.owner;
     const owner = ownerRef.current ??= desktopOwner || crypto.randomUUID();
     const generation = ++leaseGeneration.current;
     const stillCurrent = () => leaseGeneration.current === generation;
@@ -736,7 +736,7 @@ export function CardQueueShell() {
   }, [cards, detachedId, pendingDetach]);
 
   const onAdopt = useCallback((_sessionId: string) => {
-    // Cue does not host native Pi sessions.
+    // Que does not host native Pi sessions.
   }, []);
   useEffect(() => {
     if (!requestedSessionId || detachedId || openedSessionRef.current === requestedSessionId) return;
@@ -763,10 +763,10 @@ export function CardQueueShell() {
       if (typeof url === "string") openFromNotification(url);
     };
     if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", onServiceWorkerMessage);
-    window.addEventListener("cue:notification-click", onDesktopNotification);
+    window.addEventListener("que:notification-click", onDesktopNotification);
     return () => {
       if ("serviceWorker" in navigator) navigator.serviceWorker.removeEventListener("message", onServiceWorkerMessage);
-      window.removeEventListener("cue:notification-click", onDesktopNotification);
+      window.removeEventListener("que:notification-click", onDesktopNotification);
     };
   }, [detachedId, onAdopt, focusNotificationCard]);
   const remindLater = useCallback(async (card: QueueCard, minutes: number) => {
@@ -952,7 +952,7 @@ export function CardQueueShell() {
     >
     <div className="cq-layout" inert={!!inspected && !detachedId}>
       {!detachedId && <aside className="cq-sidebar">
-        <div className="cq-sidebar-brand"><Link className="cq-brand" href="/" aria-label={t("queue.Card Queue 主页")}><span className="cq-logo"><Icon name="stack" size={21} /></span>Cue</Link><button className="cq-notifications" onClick={() => void notifications.toggle()} aria-pressed={notifications.enabled} aria-label={notifications.enabled ? "系统完成通知：已开启" : "开启系统完成通知"} title={notifications.enabled ? "系统完成通知已开启，点击关闭" : "开启系统完成通知"}><Icon name={notifications.enabled ? "bell-filled" : "bell"} size={16} /></button><button onClick={() => { setSettingsSection(getLastSettingsSection(active?.cwd || defaultCwd || null)); setSettings(true); }} aria-label={t("common.settings")}><Icon name="settings" size={16} /></button></div>
+        <div className="cq-sidebar-brand"><Link className="cq-brand" href="/" aria-label={t("queue.Card Queue 主页")}><span className="cq-logo"><Icon name="stack" size={21} /></span>Que</Link><button className="cq-notifications" onClick={() => void notifications.toggle()} aria-pressed={notifications.enabled} aria-label={notifications.enabled ? "系统完成通知：已开启" : "开启系统完成通知"} title={notifications.enabled ? "系统完成通知已开启，点击关闭" : "开启系统完成通知"}><Icon name={notifications.enabled ? "bell-filled" : "bell"} size={16} /></button><button onClick={() => { setSettingsSection(getLastSettingsSection(active?.cwd || defaultCwd || null)); setSettings(true); }} aria-label={t("common.settings")}><Icon name="settings" size={16} /></button></div>
         <button className="cq-new" onClick={showNew}><Icon name="plus" /> {t("queue.新会话")}</button>
         <button className="cq-mobile-settings" onClick={() => { setSettingsSection(getLastSettingsSection(active?.cwd || defaultCwd || null)); setSettings(true); }} aria-label={t("common.settings")}><Icon name="settings" /></button>
 
@@ -963,7 +963,7 @@ export function CardQueueShell() {
             <span className="cq-small-meta"><span className="cq-dot" />{displayProject(card)}<span className="cq-index">{String(index + 1).padStart(2, "0")}</span></span>
             <strong>{titleOf(card)}</strong><span className="cq-working-bottom"><span className="cq-bars"><i /><i /><i /><i /></span>{t("queue.正在工作")}<span>↗</span></span>
           </button>)}
-          {/* Work Cue does not own: open session inspection on click. */}
+          {/* Work Que does not own: open session inspection on click. */}
           {externalWorking.map((notice) => {
             const cardId = `external:${notice.id}`;
             const harness = harnessName(notice.kind);
@@ -1060,7 +1060,7 @@ export function CardQueueShell() {
           extraAction={{ label: t("queue.返回主页面"), onClick: () => void returnToQueue() }}
         />}
         <div className="cq-stage" ref={stageRef} style={stageWidth !== null ? { width: stageWidth } : undefined}>
-          {!queue ? <div className="cq-empty"><span className="cq-orbit"><Icon name="stack" size={34} /></span><h2>{(error ? harnessErrorText(error, t) : "") || "Connecting Cue…"}</h2></div> : active && canShowDetached ? <>
+          {!queue ? <div className="cq-empty"><span className="cq-orbit"><Icon name="stack" size={34} /></span><h2>{(error ? harnessErrorText(error, t) : "") || "Connecting Que…"}</h2></div> : active && canShowDetached ? <>
             {detachedId
               ? <div className="cq-static-card cq-single-mode-card">{renderCard(active)}</div>
               : <>

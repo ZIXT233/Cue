@@ -6,7 +6,7 @@ export function createHookOscProbe(token: string, accept: (signal: HookSignal) =
   return (data: string) => {
     pending += data;
     for (;;) {
-      const start = pending.indexOf("\x1b]777;cue;");
+      const start = pending.indexOf("\x1b]777;que;");
       if (start < 0) { pending = pending.slice(-14); return; }
       pending = pending.slice(start);
       const end = pending.indexOf("\x07");

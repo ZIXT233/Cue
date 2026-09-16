@@ -2,9 +2,9 @@
 
 **English** | [简体中文](hook-api.zh-CN.md)
 
-Cue learns what a CLI harness is doing from the lifecycle hooks those CLIs already
+Que learns what a CLI harness is doing from the lifecycle hooks those CLIs already
 offer. This is the shared contract: what a harness reports, how the report reaches
-Cue, and what Cue derives from it. `bin/harness-hook.cjs` points here.
+Que, and what Que derives from it. `bin/harness-hook.cjs` points here.
 
 The authoritative implementation is `src-tauri/src/harness/signals.rs`;
 `src-tauri/protocol-ref/harness/` carries a TypeScript mirror kept as a reference.
@@ -26,17 +26,17 @@ exception is Cursor, which requires a JSON verdict on stdout (see §2.3).
 
 | Variable | Set by | Meaning |
 | --- | --- | --- |
-| `CUE_HARNESS_KIND` | launcher / ingress | Harness id. Inferred from the plugin path (`…/harness-plugins/<kind>/`) or from the event name (Cursor) when absent. |
-| `CUE_HARNESS_CHANNEL` | launcher | Token for the OSC channel. Present only for sessions Cue launched. |
-| `CUE_HARNESS_SIGNAL_DIR` | launcher | File sink for this card. Present only for sessions Cue launched. |
-| `CUE_HARNESS_TTY` | launcher | TTY the OSC frame is written to. Defaults to `/dev/tty`; SSH sessions export `$(tty)`. |
-| `CUE_HARNESS_WATCHDOG_MS` | launcher | Ingress self-kill deadline. Defaults to 8000; the launcher injects `(hook timeout − 2s)`, floored at 1s, so a hung stdin still delivers the signal instead of dying to the CLI's own "hook timed out". |
-| `CUE_HARNESS_SESSION_ID` | launcher | Session being resumed, so a plugin can bind to it before the first event. |
-| `CUE_HARNESS_DEBUG` | launcher | `1` writes `hook-trace.jsonl` and `last-stop-diagnostic.json` into the sink. |
-| `CUE_EXTERNAL_SIGNAL_DIR` | user | Overrides the external sink location. |
+| `QUE_HARNESS_KIND` | launcher / ingress | Harness id. Inferred from the plugin path (`…/harness-plugins/<kind>/`) or from the event name (Cursor) when absent. |
+| `QUE_HARNESS_CHANNEL` | launcher | Token for the OSC channel. Present only for sessions Que launched. |
+| `QUE_HARNESS_SIGNAL_DIR` | launcher | File sink for this card. Present only for sessions Que launched. |
+| `QUE_HARNESS_TTY` | launcher | TTY the OSC frame is written to. Defaults to `/dev/tty`; SSH sessions export `$(tty)`. |
+| `QUE_HARNESS_WATCHDOG_MS` | launcher | Ingress self-kill deadline. Defaults to 8000; the launcher injects `(hook timeout − 2s)`, floored at 1s, so a hung stdin still delivers the signal instead of dying to the CLI's own "hook timed out". |
+| `QUE_HARNESS_SESSION_ID` | launcher | Session being resumed, so a plugin can bind to it before the first event. |
+| `QUE_HARNESS_DEBUG` | launcher | `1` writes `hook-trace.jsonl` and `last-stop-diagnostic.json` into the sink. |
+| `QUE_EXTERNAL_SIGNAL_DIR` | user | Overrides the external sink location. |
 
-The ingress exits silently when none of `CUE_HARNESS_SIGNAL_DIR`, `CUE_HARNESS_CHANNEL`,
-a legacy `active.json`, or a known `CUE_HARNESS_KIND` is present. Known kinds:
+The ingress exits silently when none of `QUE_HARNESS_SIGNAL_DIR`, `QUE_HARNESS_CHANNEL`,
+a legacy `active.json`, or a known `QUE_HARNESS_KIND` is present. Known kinds:
 `cursor`, `codex`, `antigravity`, `gemini`, `grok`, `claude`, `opencode`, `codebuddy`,
 `pi`, `omp`.
 
@@ -59,17 +59,17 @@ The ingress reads a superset of every harness's field names and emits one shape
 | `notification` | From `notification_type` / `notificationType` / `type`. |
 | `fullyIdle` | Antigravity only: whether a `Stop` really ended the turn. A fact the contract has no event name for, reported as a field instead of by renaming an event. |
 | `workspaceRoot` | External sessions only, so a cold start can still name the card. |
-| `external` | Set by the ingress when the emitting process carried no Cue channel. |
+| `external` | Set by the ingress when the emitting process carried no Que channel. |
 
 ## 2. Delivery
 
 ### 2.1 OSC
 
 ```
-ESC ] 777 ; cue ; <base64 of {"token":…,"signal":{…}}> BEL
+ESC ] 777 ; que ; <base64 of {"token":…,"signal":{…}}> BEL
 ```
 
-Written to `CUE_HARNESS_TTY`. `src-tauri/src/harness/osc.rs` reassembles frames across
+Written to `QUE_HARNESS_TTY`. `src-tauri/src/harness/osc.rs` reassembles frames across
 PTY chunk boundaries, requires the token to match the terminal it was launched for, and
 re-stamps `at` with the ingest clock — a hook process's own clock is not trusted.
 
@@ -86,9 +86,9 @@ pair with mode `0600`; a consumer deletes the file once read.
 | Card | `<data>/harness-signals/<terminal_id>/` | `paths.rs::signal_dir`; pre-created by the launcher |
 | External | `<data>/external-signals/` | `paths.rs::external_signal_dir`; the ingress creates it and prunes files older than 5 minutes |
 
-`<data>` is `CUE_DATA_DIR` or `~/.cue`.
+`<data>` is `QUE_DATA_DIR` or `~/.que`.
 
-External signals are the ones emitted by sessions **Cue never launched** — Cursor's
+External signals are the ones emitted by sessions **Que never launched** — Cursor's
 user-level `hooks.json` is global, so IDE chats and ordinary terminals report there too.
 They become transient notices rather than queue cards, and each kind can be switched off
 individually in settings.
@@ -97,7 +97,7 @@ individually in settings.
 
 Cursor hooks block on a verdict, so the ingress always answers: `{"continue":true}` for
 `beforeSubmitPrompt`, `{"permission":"allow"}` for `preToolUse` / `beforeShellExecution` /
-`beforeMCPExecution`, `{}` otherwise. Cue never gates a session it is only watching —
+`beforeMCPExecution`, `{}` otherwise. Que never gates a session it is only watching —
 which is exactly why those three events cannot be read as "the user is being asked"; see §4.4.
 
 ## 3. From an event to a conclusion
@@ -151,7 +151,7 @@ promotes to `attention`.
 
 ### 4.1 Attention, stated
 
-These are the CLI telling Cue a prompt is on screen. They take effect immediately:
+These are the CLI telling Que a prompt is on screen. They take effect immediately:
 
 - `Notification(permission_prompt)`, `Notification(ToolPermission)`, `Notification(idle_prompt)`
 - `PermissionRequest` — the harness reports the gate itself
@@ -236,7 +236,7 @@ Subagent events (`agentId` present) are dropped for every kind.
 
 ## 6. Debugging
 
-With `CUE_HARNESS_DEBUG=1` the ingress appends `hook-trace.jsonl` (event, session id, and
+With `QUE_HARNESS_DEBUG=1` the ingress appends `hook-trace.jsonl` (event, session id, and
 which delivery legs succeeded) and, for Codex `Stop`, `last-stop-diagnostic.json`
 (`replyFieldPresent`, `replyLength`, `previewLength` — field metadata only, never text).
 

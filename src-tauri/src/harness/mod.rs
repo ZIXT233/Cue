@@ -303,7 +303,7 @@ impl HarnessRuntime {
                 prefer_kitty_notifications(&mut env);
             }
             if let Some(session_id) = resume.as_ref().and_then(|s| s.provider_session_id.clone()) {
-                env.insert("CUE_HARNESS_SESSION_ID".into(), session_id);
+                env.insert("QUE_HARNESS_SESSION_ID".into(), session_id);
             }
             let mut launch_args = command_prefix;
             if let Some(session_id) = resume.as_ref().and_then(|s| s.provider_session_id.as_deref()) {
@@ -317,7 +317,7 @@ impl HarnessRuntime {
                 let command = std::iter::once(adapter.executable.to_string()).chain(launch_args).map(|s| crate::ssh::shell_quote(&s)).collect::<Vec<_>>().join(" ");
                 let unset = tweaks.ssh_unset.iter().map(|name| format!("unset {name} && ")).collect::<String>();
                 let remote = format!(
-                    "cd {} && {}{}CUE_HARNESS_TTY=$(tty) && export CUE_HARNESS_TTY && exec {}",
+                    "cd {} && {}{}QUE_HARNESS_TTY=$(tty) && export QUE_HARNESS_TTY && exec {}",
                     crate::ssh::shell_quote(&workspace.cwd),
                     unset,
                     if exports.is_empty() { String::new() } else { format!("export {exports} && ") },

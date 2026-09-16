@@ -1,4 +1,4 @@
-//! Whatever the CLI already had in the config file Cue has to write into.
+//! Whatever the CLI already had in the config file Que has to write into.
 //!
 //! Only the two harnesses whose config is *replaced* rather than extended share this:
 //! Gemini's defaults file and OpenCode's config env. Every harness-private guard or

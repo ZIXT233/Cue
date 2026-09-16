@@ -5,14 +5,14 @@
  * 直接运行：
  *     node bin/measure-cursor-boot.mjs
  *     node bin/measure-cursor-boot.mjs --repeat 3
- *     node bin/measure-cursor-boot.mjs --cwd D:\Cue\src-tauri
+ *     node bin/measure-cursor-boot.mjs --cwd D:\Que\src-tauri
  *
  * 为什么必须用 pty：cursor 靠 isatty 判断进 TUI 还是 print 模式。
  * 用管道（stdio: pipe）测，它直接走 print 模式并报
  * "No prompt provided for print mode"，测到的不是真实启动路径。
  *
  * 依赖：node 内置无 pty。优先用 node-pty，没有则回落到 Windows 上的
- * winpty/conpty 直连（通过 Cue 已有的 portable-pty 不可用时，退化为
+ * winpty/conpty 直连（通过 Que 已有的 portable-pty 不可用时，退化为
  * 用 `cmd /c start` + 日志文件的方式）。脚本会明确告诉你走的哪条路。
  */
 
@@ -28,7 +28,7 @@ function arg(name, fallback) {
   return v && !v.startsWith('--') ? v : true;
 }
 
-const CWD = arg('cwd', 'D:\\Cue\\src-tauri');
+const CWD = arg('cwd', 'D:\\Que\\src-tauri');
 const REPEAT = Number(arg('repeat', 2)) || 2;
 const OBSERVE_MS = Number(arg('observe', 30000)) || 30000;
 
@@ -149,7 +149,7 @@ async function runWithPty(pty, cursor, label) {
   });
 }
 
-// 无 node-pty 时的退化方案：Windows 上用 Cue 自身或 winpty 起 pty。
+// 无 node-pty 时的退化方案：Windows 上用 Que 自身或 winpty 起 pty。
 // 这里用 `winpty`（Git Bash 自带）若可用；否则明确报告无法测。
 async function runNoPty() {
   const winpty = spawnSync('where', ['winpty'], { encoding: 'utf8', shell: true });
@@ -185,7 +185,7 @@ async function runNoPty() {
     say('   然后再跑本脚本。');
     say('');
     say('（用管道测是无效的：cursor 会走 print 模式并报 No prompt provided。）');
-    fs.writeFileSync(path.join(os.tmpdir(), 'cue-cursor-boot-measure.txt'), out.join('\n'), 'utf8');
+    fs.writeFileSync(path.join(os.tmpdir(), 'que-cursor-boot-measure.txt'), out.join('\n'), 'utf8');
     process.exit(2);
   }
 
@@ -208,7 +208,7 @@ async function runNoPty() {
     say('');
   }
 
-  const dst = path.join(os.tmpdir(), 'cue-cursor-boot-measure.txt');
+  const dst = path.join(os.tmpdir(), 'que-cursor-boot-measure.txt');
   fs.writeFileSync(dst, out.join('\n'), 'utf8');
   console.log(`结果已写入: ${dst}`);
 })();

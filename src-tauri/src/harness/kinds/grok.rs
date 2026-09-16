@@ -1,5 +1,5 @@
 //! Grok: a bundle of its own, copied into the CLI's hook directory, which is marked so
-//! Cue can tell its own file from one the user wrote.
+//! Que can tell its own file from one the user wrote.
 
 use super::install::Host;
 use super::registry::{resume_flag, Adapter, Ctx, GlobalCtx, Harness, LaunchTweaks, Plan, UserMerge};
@@ -17,8 +17,8 @@ const EVENTS: &[&str] = &[
     "Stop", "StopFailure", "StopCancelled", "Notification",
 ];
 
-/// Copies the bundle into place on a remote host, refusing a file Cue does not own.
-const SSH_COPY: &str = r#"const fs=require("node:fs"),p=require("node:path"),src=process.argv[1],dest=process.argv[2];if(fs.existsSync(dest)&&JSON.parse(fs.readFileSync(dest,"utf8")).cueManaged!==true)throw Error("Existing hook file is not owned by Cue");fs.mkdirSync(p.dirname(dest),{recursive:true,mode:448});fs.copyFileSync(src,dest);fs.chmodSync(dest,384);"#;
+/// Copies the bundle into place on a remote host, refusing a file Que does not own.
+const SSH_COPY: &str = r#"const fs=require("node:fs"),p=require("node:path"),src=process.argv[1],dest=process.argv[2];if(fs.existsSync(dest)&&JSON.parse(fs.readFileSync(dest,"utf8")).queManaged!==true)throw Error("Existing hook file is not owned by Que");fs.mkdirSync(p.dirname(dest),{recursive:true,mode:448});fs.copyFileSync(src,dest);fs.chmodSync(dest,384);"#;
 
 async fn plan(ctx: Ctx<'_>, events: &'static [&'static str]) -> AppResult<Plan> {
     let mut plan = Plan::default();
@@ -27,14 +27,14 @@ async fn plan(ctx: Ctx<'_>, events: &'static [&'static str]) -> AppResult<Plan> 
     for &event in events {
         hooks.insert(event.into(), serde_json::json!([{ "hooks": [{ "type": "command", "command": command, "timeout": ctx.host.timeout }] }]));
     }
-    plan.files.insert("grok-hooks.json".into(), serde_json::json!({ "cueManaged": true, "hooks": hooks }).to_string());
+    plan.files.insert("grok-hooks.json".into(), serde_json::json!({ "queManaged": true, "hooks": hooks }).to_string());
     let path = if ctx.workspace.kind == "ssh" {
         let host = ctx.workspace.ssh_host.as_deref().ok_or_else(|| AppError::msg("工作区不存在"))?;
         let home = String::from_utf8_lossy(&ssh_exec(host, r#"printf "%s" "${GROK_HOME:-$HOME/.grok}""#).await?).trim().to_string();
-        format!("{home}/hooks/cue-session-state.json")
+        format!("{home}/hooks/que-session-state.json")
     } else {
         std::env::var("GROK_HOME").map(PathBuf::from).unwrap_or_else(|_| home().join(".grok"))
-            .join("hooks/cue-session-state.json").to_string_lossy().into_owned()
+            .join("hooks/que-session-state.json").to_string_lossy().into_owned()
     };
     plan.user_config.push(UserMerge {
         path,
@@ -45,7 +45,7 @@ async fn plan(ctx: Ctx<'_>, events: &'static [&'static str]) -> AppResult<Plan> 
     Ok(plan)
 }
 
-/// Grok's file is a copy, not a merge: the whole file is Cue's, guarded by the marker.
+/// Grok's file is a copy, not a merge: the whole file is Que's, guarded by the marker.
 fn merge_local(existing: Option<&str>, payload: &str, _host: &Host) -> AppResult<String> {
     owned(existing)?;
     Ok(payload.to_string())
@@ -55,12 +55,12 @@ fn home() -> PathBuf {
     dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
 }
 
-/// Write over the CLI's hook file only when it still carries Cue's marker.
+/// Write over the CLI's hook file only when it still carries Que's marker.
 fn owned(existing: Option<&str>) -> AppResult<()> {
     match existing {
         Some(raw) => {
             let parsed: serde_json::Value = serde_json::from_str(raw)?;
-            if parsed.get("cueManaged") != Some(&serde_json::json!(true)) {
+            if parsed.get("queManaged") != Some(&serde_json::json!(true)) {
                 return Err(AppError::machine_detail("HARNESS_HOOKS_FOREIGN", "grok"));
             }
             Ok(())
@@ -98,8 +98,8 @@ impl Harness for Grok {
         Box::pin(plan(ctx, self.events()))
     }
 
-    /// What a Grok session Cue never launched needs: its own ingress, and the bundle
-    /// copied into the CLI's hook directory under Cue's `cueManaged` marker.
+    /// What a Grok session Que never launched needs: its own ingress, and the bundle
+    /// copied into the CLI's hook directory under Que's `queManaged` marker.
     fn global(&self, ctx: &GlobalCtx) {
         let _ = ctx.install_ingress("grok");
         let hook_path = ctx.hook_path("grok");
@@ -110,11 +110,11 @@ impl Harness for Grok {
         }
         let dir = ctx.home.join(".grok/hooks");
         let _ = std::fs::create_dir_all(&dir);
-        let _ = atomic_write(&dir.join("cue-session-state.json"), &serde_json::json!({ "cueManaged": true, "hooks": hooks }).to_string());
+        let _ = atomic_write(&dir.join("que-session-state.json"), &serde_json::json!({ "queManaged": true, "hooks": hooks }).to_string());
     }
 
     fn remote_root(&self, home: &str, _token: &str, _ingress_sha: &str) -> String {
-        format!("{home}/.cache/cue/harness-plugins/grok")
+        format!("{home}/.cache/que/harness-plugins/grok")
     }
 
     fn external_ingress(&self) -> bool {
@@ -211,7 +211,7 @@ mod tests {
     fn refuses_unowned_file() {
         let unowned = r#"{"hooks":{}}"#;
         assert!(owned(Some(unowned)).is_err());
-        assert!(owned(Some(r#"{"cueManaged":true}"#)).is_ok());
+        assert!(owned(Some(r#"{"queManaged":true}"#)).is_ok());
         assert!(owned(None).is_ok());
     }
 }

@@ -2,7 +2,7 @@
 
 [English](hook-api.md) | **简体中文**
 
-Cue 通过各 CLI Harness 本就提供的生命周期钩子来了解它在做什么。这里是共享契约：Harness 上报什么、上报如何抵达 Cue、Cue 从中推导出什么。`bin/harness-hook.cjs` 指向的就是本文件。
+Que 通过各 CLI Harness 本就提供的生命周期钩子来了解它在做什么。这里是共享契约：Harness 上报什么、上报如何抵达 Que、Que 从中推导出什么。`bin/harness-hook.cjs` 指向的就是本文件。
 
 实现主体是 `src-tauri/src/harness/signals.rs`；`src-tauri/protocol-ref/harness/` 有一份 TypeScript 镜像作为参考。下文描述的行为以两侧保持一致为前提。
 
@@ -20,16 +20,16 @@ Cue 通过各 CLI Harness 本就提供的生命周期钩子来了解它在做什
 
 | 变量 | 由谁设置 | 含义 |
 | --- | --- | --- |
-| `CUE_HARNESS_KIND` | 启动器 / ingress | Harness id。缺失时从插件路径（`…/harness-plugins/<kind>/`）推断，或从事件名推断（Cursor）。 |
-| `CUE_HARNESS_CHANNEL` | 启动器 | OSC 通道的 token。仅 Cue 启动的会话有。 |
-| `CUE_HARNESS_SIGNAL_DIR` | 启动器 | 该卡片的文件 sink。仅 Cue 启动的会话有。 |
-| `CUE_HARNESS_TTY` | 启动器 | OSC 帧写入的 TTY。默认 `/dev/tty`；SSH 会话导出 `$(tty)`。 |
-| `CUE_HARNESS_WATCHDOG_MS` | 启动器 | ingress 自我了结的截止时间。默认 8000；启动器注入 `(hook 超时 − 2s)`，下限 1s，这样即便 stdin 卡住也能把信号发出去，而不是死在 CLI 自己的 "hook timed out" 上。 |
-| `CUE_HARNESS_SESSION_ID` | 启动器 | 正在续接的会话，供插件在首个事件之前就绑定身份。 |
-| `CUE_HARNESS_DEBUG` | 启动器 | 置 `1` 时往 sink 写 `hook-trace.jsonl` 与 `last-stop-diagnostic.json`。 |
-| `CUE_EXTERNAL_SIGNAL_DIR` | 用户 | 覆盖外部 sink 的位置。 |
+| `QUE_HARNESS_KIND` | 启动器 / ingress | Harness id。缺失时从插件路径（`…/harness-plugins/<kind>/`）推断，或从事件名推断（Cursor）。 |
+| `QUE_HARNESS_CHANNEL` | 启动器 | OSC 通道的 token。仅 Que 启动的会话有。 |
+| `QUE_HARNESS_SIGNAL_DIR` | 启动器 | 该卡片的文件 sink。仅 Que 启动的会话有。 |
+| `QUE_HARNESS_TTY` | 启动器 | OSC 帧写入的 TTY。默认 `/dev/tty`；SSH 会话导出 `$(tty)`。 |
+| `QUE_HARNESS_WATCHDOG_MS` | 启动器 | ingress 自我了结的截止时间。默认 8000；启动器注入 `(hook 超时 − 2s)`，下限 1s，这样即便 stdin 卡住也能把信号发出去，而不是死在 CLI 自己的 "hook timed out" 上。 |
+| `QUE_HARNESS_SESSION_ID` | 启动器 | 正在续接的会话，供插件在首个事件之前就绑定身份。 |
+| `QUE_HARNESS_DEBUG` | 启动器 | 置 `1` 时往 sink 写 `hook-trace.jsonl` 与 `last-stop-diagnostic.json`。 |
+| `QUE_EXTERNAL_SIGNAL_DIR` | 用户 | 覆盖外部 sink 的位置。 |
 
-当 `CUE_HARNESS_SIGNAL_DIR`、`CUE_HARNESS_CHANNEL`、legacy `active.json` 都不存在，且 `CUE_HARNESS_KIND` 不是已知 Harness 时，ingress 静默退出。已知 kind：`cursor`、`codex`、`antigravity`、`gemini`、`grok`、`claude`、`opencode`、`codebuddy`、`pi`、`omp`。
+当 `QUE_HARNESS_SIGNAL_DIR`、`QUE_HARNESS_CHANNEL`、legacy `active.json` 都不存在，且 `QUE_HARNESS_KIND` 不是已知 Harness 时，ingress 静默退出。已知 kind：`cursor`、`codex`、`antigravity`、`gemini`、`grok`、`claude`、`opencode`、`codebuddy`、`pi`、`omp`。
 
 ### 1.2 载荷
 
@@ -49,17 +49,17 @@ ingress 读取所有 Harness 字段名的并集，统一输出一种结构（`Ho
 | `notification` | 取自 `notification_type` / `notificationType` / `type`。 |
 | `fullyIdle` | 仅 Antigravity：这次 `Stop` 是否真的结束了回合。契约里没有对应事件名的事实，以字段上报，而不是改写成另一个事件。 |
 | `workspaceRoot` | 仅外部会话，让冷启动也能给卡片命名。 |
-| `external` | 当发出信号的进程没有携带 Cue 通道时，由 ingress 置位。 |
+| `external` | 当发出信号的进程没有携带 Que 通道时，由 ingress 置位。 |
 
 ## 2. 投递
 
 ### 2.1 OSC
 
 ```
-ESC ] 777 ; cue ; <base64 of {"token":…,"signal":{…}}> BEL
+ESC ] 777 ; que ; <base64 of {"token":…,"signal":{…}}> BEL
 ```
 
-写入 `CUE_HARNESS_TTY`。`src-tauri/src/harness/osc.rs` 会跨 PTY 分片重组帧、要求 token 与该终端的启动 token 匹配，并用接收时刻重写 `at`——hook 进程自己的时钟不被信任。
+写入 `QUE_HARNESS_TTY`。`src-tauri/src/harness/osc.rs` 会跨 PTY 分片重组帧、要求 token 与该终端的启动 token 匹配，并用接收时刻重写 `at`——hook 进程自己的时钟不被信任。
 
 这条路径让卡片获得亚秒级延迟；文件 sink 则是那些 hook runner 写不了 TTY 的 Harness 的兜底。
 
@@ -72,13 +72,13 @@ ESC ] 777 ; cue ; <base64 of {"token":…,"signal":{…}}> BEL
 | 卡片 | `<data>/harness-signals/<terminal_id>/` | `paths.rs::signal_dir`，启动时预建 |
 | 外部 | `<data>/external-signals/` | `paths.rs::external_signal_dir`，由 ingress 创建，并顺手清理超过 5 分钟的文件 |
 
-`<data>` 为 `CUE_DATA_DIR` 或 `~/.cue`。
+`<data>` 为 `QUE_DATA_DIR` 或 `~/.que`。
 
-外部信号来自 **Cue 从未启动的会话**——Cursor 的用户级 `hooks.json` 是全局的，IDE 聊天和普通终端也会上报到这里。它们成为转瞬即逝的外部提示而非队列卡片，且每种 kind 都能在设置里单独关闭。
+外部信号来自 **Que 从未启动的会话**——Cursor 的用户级 `hooks.json` 是全局的，IDE 聊天和普通终端也会上报到这里。它们成为转瞬即逝的外部提示而非队列卡片，且每种 kind 都能在设置里单独关闭。
 
 ### 2.3 Cursor 的应答
 
-Cursor 的 hook 会阻塞等待裁决，所以 ingress 总是应答：`beforeSubmitPrompt` 返回 `{"continue":true}`，`preToolUse` / `beforeShellExecution` / `beforeMCPExecution` 返回 `{"permission":"allow"}`，其余返回 `{}`。Cue 对自己只在旁观的会话从不设闸——这正是那三个事件不能读作"用户正在被询问"的原因，见 §4.4。
+Cursor 的 hook 会阻塞等待裁决，所以 ingress 总是应答：`beforeSubmitPrompt` 返回 `{"continue":true}`，`preToolUse` / `beforeShellExecution` / `beforeMCPExecution` 返回 `{"permission":"allow"}`，其余返回 `{}`。Que 对自己只在旁观的会话从不设闸——这正是那三个事件不能读作"用户正在被询问"的原因，见 §4.4。
 
 ## 3. 从事件到结论
 
@@ -117,7 +117,7 @@ ingress 只做名字映射，从不做语义改写：Harness 的词汇原样传�
 
 ### 4.1 明确上报的 attention
 
-这些是 CLI 在直接告诉 Cue"屏幕上有一个提示"，立即生效：
+这些是 CLI 在直接告诉 Que"屏幕上有一个提示"，立即生效：
 
 - `Notification(permission_prompt)`、`Notification(ToolPermission)`、`Notification(idle_prompt)`
 - `PermissionRequest`——Harness 自己上报的门禁
@@ -180,7 +180,7 @@ Antigravity 与 Cursor 在**用户是否被询问**这点上发出的是同一�
 
 ## 6. 诊断
 
-开启 `CUE_HARNESS_DEBUG=1` 后，ingress 会追加 `hook-trace.jsonl`（事件、会话 id、以及各条投递链路是否成功）；对 Codex 的 `Stop` 还会写 `last-stop-diagnostic.json`（`replyFieldPresent`、`replyLength`、`previewLength`——只有字段元信息，绝不含文本）。
+开启 `QUE_HARNESS_DEBUG=1` 后，ingress 会追加 `hook-trace.jsonl`（事件、会话 id、以及各条投递链路是否成功）；对 Codex 的 `Stop` 还会写 `last-stop-diagnostic.json`（`replyFieldPresent`、`replyLength`、`previewLength`——只有字段元信息，绝不含文本）。
 
 Rust 侧会把每个接入的信号按终端记录，附带 `source`：`hook` / `file` / `osc` / `notify-osc` / `title` / `probe`。一次被升级的挂起会记下自己的 `HeldAsk` 事件，包含挂起时长与它记录的工具名，因此事后能把"迟到询问"与真实询问区分开。同一份日志通过 `HarnessDebugSnapshot` 暴露出来。
 

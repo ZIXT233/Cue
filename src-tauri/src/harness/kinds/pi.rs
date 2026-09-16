@@ -55,7 +55,7 @@ impl Harness for Pi {
         Box::pin(plan(ctx))
     }
 
-    /// Pi is loaded by an extension, so that is all a session Cue never launched needs.
+    /// Pi is loaded by an extension, so that is all a session Que never launched needs.
     fn global(&self, ctx: &GlobalCtx) {
         let _ = ctx.install_plugin("pi", "harness-pi.mjs", "pi-extension.mjs");
     }

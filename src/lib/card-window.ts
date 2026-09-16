@@ -21,7 +21,7 @@ export async function openDetachedCardWindow(cardId: string): Promise<boolean> {
   }
   const webview = new WebviewWindow(label, {
     url: `/?card=${encodeURIComponent(cardId)}`,
-    title: "Cue",
+    title: "Que",
     width: 1200,
     height: 900,
     minWidth: 720,

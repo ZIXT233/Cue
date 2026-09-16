@@ -69,7 +69,7 @@ pub fn sync_installed_hooks(bin_dir: &Path, plugins: &Path) -> Vec<String> {
     refreshed
 }
 
-/// Install the hooks that serve sessions Cue never launched — IDE chats, plain terminals.
+/// Install the hooks that serve sessions Que never launched — IDE chats, plain terminals.
 /// Their user-level config is global, so one pass covers all of them. Each harness owns
 /// its own file (`kinds/<kind>.rs::global`); nothing here knows one from another.
 pub fn deploy_external_hooks(bin_dir: &Path, plugins: &Path) {

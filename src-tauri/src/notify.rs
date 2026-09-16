@@ -3,7 +3,7 @@ use tauri::AppHandle;
 /// Event emitted to the frontend when the user clicks a notification
 /// (macOS only). Payload: `{ cardId: string | null, sessionUrl: string }`.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub const RESPONSE_EVENT: &str = "cue://notification-response";
+pub const RESPONSE_EVENT: &str = "que://notification-response";
 
 // user-notify is only used on macOS: it is the only desktop backend that
 // delivers click callbacks. On Windows its `Show()` can silently no-op for

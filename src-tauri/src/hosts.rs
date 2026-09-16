@@ -225,7 +225,7 @@ pub fn saved_host(id: &str) -> AppResult<Option<RemoteHost>> {
 
 /// Look a host id up in the saved hosts, then in `~/.ssh/config`.
 ///
-/// `saved_host` alone is not enough any more: Cue resolves connection
+/// `saved_host` alone is not enough any more: Que resolves connection
 /// parameters itself instead of leaving it to the `ssh` binary, so it needs the
 /// full alias table — including each entry's `IdentityFile`.
 pub fn resolve(id: &str) -> AppResult<Option<RemoteHost>> {

@@ -1,5 +1,5 @@
 /**
- * Launch-chain failure codes Cue itself authors. Their messages live in the i18n files
+ * Launch-chain failure codes Que itself authors. Their messages live in the i18n files
  * (`harness.error.<CODE>`) and are translated at render time, so a locale change
  * re-renders them. Everything without one of these codes is raw terminal, SSH or io
  * text — the command's own words are the actual answer, and pass through untouched.

@@ -1,166 +1,61 @@
-# Cue
+# Que
 
 **English** | [简体中文](README.zh-CN.md)
 
 **Queue of Agent Cues**
 
-Cue schedules your attention with a unified queue of waiting Agent sessions, so you can just handle the one at the front instead of chasing notification badges.
+Que schedules your attention with a unified queue of waiting Agent sessions, so you can just handle the one at the front instead of chasing notification badges.
 
-Cue supports mainstream CLI harnesses through terminal cards, so you can handle multiple harness workflows in one place.
+Que supports mainstream CLI harnesses through terminal cards, so you can handle multiple harness workflows in one place.
 
-## Stack
+## How it works
 
-- Frontend: Vite + React
-- Desktop: Tauri 2
-- Backend: Rust (queue, PTY, harness hooks/OSC, workspaces, SSH)
+### A queue of cards, weighted your way
 
-## Prerequisites
+- Every session is a card with live state. Sessions that are working are not in the queue — the queue is exactly the cards waiting on you.
+- You decide the order: weighted score or FIFO. Not your turn yet? Remind-later parks the card and it comes back on its own.
+- Finish one, the next steps up. Archive finished work, pop a running session out into its own window.
+- When a session needs you, a desktop notification takes you straight to its card.
 
-- [Node.js](https://nodejs.org/) 18+
-- npm (ships with Node.js)
-- [Rust](https://www.rust-lang.org/tools/install) stable (`rustup`)
-- Platform toolchain for Tauri 2: see [Prerequisites](https://v2.tauri.app/start/prerequisites/)
-  - macOS: Xcode Command Line Tools
-  - Windows: Visual Studio C++ workload + WebView2
-  - Linux: `webkit2gtk` and the rest of the Tauri system packages
+### Works with the CLI harnesses you already use
+
+Claude Code, CodeBuddy, Codex, Cursor, Antigravity, Gemini, Grok, OpenCode, Pi / OMP — plus a plain shell card for everything else.
+
+- Launching a card sets the harness up automatically; no manual hook configuration, and config entries you wrote yourself are never overwritten.
+- Cards show real session titles and prompts, and restarting a card picks the original conversation back up.
+- Current checked state per harness (message send / normal reply / ask / permission / resume sync / title):
+
+| Harness | Message send | Normal reply | Ask | Permission | Resume sync | Title |
+| --- | --- | --- | --- | --- | --- | --- |
+| Codex | OK | OK | OK | OK | OK | thread_name → first session prompt → last hooked prompt → Codex · workspace |
+| Claude Code | OK | OK | OK | OK | | custom-title → first session prompt → last hooked prompt → Claude Code · workspace |
+| CodeBuddy | | | | | | custom-title → ai-title → topic → first session prompt → last hooked prompt → CodeBuddy · workspace |
+| Cursor | OK | OK | OK | OK | pass | meta.title → first prompt-history entry → last hooked prompt → Cursor Agent · workspace |
+| Pi | OK | OK | OK | OK | OK | session_info.name → first session prompt → last hooked prompt → Pi CLI · workspace |
+| OMP | OK | OK | OK | OK | OK | title → session_info.name → first session prompt → last hooked prompt → Oh My Pi · workspace |
+| Grok | OK | OK | OK | OK | OK | summary.generated_title → first session prompt → last hooked prompt → Grok Build · workspace |
+| Antigravity | | | | | | last hooked prompt → Antigravity CLI · workspace |
+| OpenCode | OK | OK | OK | OK | OK | OSC info.title (default "New session" filtered) → first hooked prompt → last hooked prompt → OpenCode · workspace |
+| Shell | | | | | | workspace name |
+
+### Catches the sessions it didn't start
+
+IDE chats and plain terminals run the same harnesses. With the user-level hooks installed, Que captures those asks too and shows them as notice cards in the same deck — with the project, the question, and the conversation so far. They disappear when the session goes back to work, and each harness's capture can be toggled in settings.
+
+### Remote workspaces
+
+- Save an SSH host once and pick a directory on it — cards, live state and notifications work exactly like local.
+- The remote machine needs the harness CLI and Node.js 22+ installed.
+- Both are checked before a card opens, so a missing dependency is a clear error message instead of a dead terminal you have to diagnose yourself.
+
+## Development
+
+Prerequisites: Node.js 22+, a Rust toolchain, and the [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your platform.
 
 ```bash
-node -v
-npm -v
-rustc -V
-cargo -V
-npx tauri --version
-```
-
-## Setup
-
-```bash
-git clone https://github.com/ZIXT233/Cue.git
-cd Cue
 npm install
+npm run tauri dev     # run the desktop app
+npm run tauri build   # package the current OS
 ```
 
-Rust crates download on the first `tauri` / `cargo` run (`src-tauri/`).
-
-## Develop
-
-Desktop app (starts Vite on port `1420`, then the Tauri window):
-
-```bash
-npm run tauri dev
-```
-
-Frontend only (browser, no Rust / PTY / desktop APIs):
-
-```bash
-npm run dev
-```
-
-Typecheck:
-
-```bash
-npx tsc --noEmit
-```
-
-Diagnostics:
-
-```bash
-npx tauri info
-```
-
-## Build
-
-### Frontend
-
-```bash
-npm run build
-```
-
-Runs `tsc && vite build`. Output: `dist/`.
-
-Preview the production frontend:
-
-```bash
-npm run preview
-```
-
-### Desktop
-
-Release build for the current platform (also runs `npm run build` first):
-
-```bash
-npm run tauri build
-```
-
-Debug desktop build (faster, larger, includes debug symbols):
-
-```bash
-npm run tauri -- build --debug
-```
-
-### Bundles
-
-Default `targets` in `src-tauri/tauri.conf.json` is `all` for the current OS.
-
-```bash
-# macOS
-npm run tauri -- build --bundles app
-npm run tauri -- build --bundles dmg
-
-# Windows
-npm run tauri -- build --bundles nsis
-npm run tauri -- build --bundles msi
-
-# Linux
-npm run tauri -- build --bundles deb
-npm run tauri -- build --bundles rpm
-npm run tauri -- build --bundles appimage
-```
-
-macOS universal binary (Apple Silicon + Intel):
-
-```bash
-rustup target add aarch64-apple-darwin x86_64-apple-darwin
-npm run tauri -- build --target universal-apple-darwin
-```
-
-### Rust crate only
-
-Does not produce an installable app bundle.
-
-```bash
-cd src-tauri
-cargo check
-cargo build
-cargo build --release
-```
-
-### Icons
-
-Regenerate platform icons from the mark:
-
-```bash
-npx tauri icon src-tauri/icons/cue-mark.svg
-```
-
-Packaged Dock / Start Menu icons need a fresh desktop build (or reinstall). `tauri dev` may keep a cached icon.
-
-## Artifacts
-
-| Kind | Path |
-| --- | --- |
-| Frontend | `dist/` |
-| Rust binary | `src-tauri/target/release/cue` |
-| macOS app | `src-tauri/target/release/bundle/macos/Cue.app` |
-| macOS dmg | `src-tauri/target/release/bundle/dmg/` |
-| Windows | `src-tauri/target/release/bundle/nsis/`, `msi/` |
-| Linux | `src-tauri/target/release/bundle/deb/`, `rpm/`, `appimage/` |
-| Debug bundles | `src-tauri/target/debug/bundle/` |
-
-`node_modules/`, `dist/`, and `src-tauri/target/` are gitignored.
-
-## Notes
-
-App data lives in `~/.cue`.
-
-Harness hook environment variables are `CUE_HARNESS_*`; the OSC reply tag is `\x1b]777;cue;…`.
+App data lives in `~/.que`. The harness wire contract and debugging guide: [docs/harness/hook-api.md](docs/harness/hook-api.md).

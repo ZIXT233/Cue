@@ -3,13 +3,13 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 // Codex's title index contains ids/names only. We never load conversation history.
-const cache = globalThis as typeof globalThis & { __cueCodexTitles?: { path: string; stamp: string; titles: Map<string, string> } };
+const cache = globalThis as typeof globalThis & { __queCodexTitles?: { path: string; stamp: string; titles: Map<string, string> } };
 export async function codexSessionTitle(sessionId: string): Promise<string | undefined> {
   const path = join(process.env.CODEX_HOME || join(homedir(), ".codex"), "session_index.jsonl");
   try {
     const info = await stat(path);
     const stamp = `${info.mtimeMs}:${info.size}`;
-    if (cache.__cueCodexTitles?.path !== path || cache.__cueCodexTitles.stamp !== stamp) {
+    if (cache.__queCodexTitles?.path !== path || cache.__queCodexTitles.stamp !== stamp) {
       const titles = new Map<string, string>();
       for (const line of (await readFile(path, "utf8")).split("\n")) {
         try {
@@ -17,9 +17,9 @@ export async function codexSessionTitle(sessionId: string): Promise<string | und
           if (typeof entry.id === "string" && typeof entry.thread_name === "string" && entry.thread_name.trim()) titles.set(entry.id, entry.thread_name.trim());
         } catch { /* The final appended line may still be incomplete. */ }
       }
-      cache.__cueCodexTitles = { path, stamp, titles };
+      cache.__queCodexTitles = { path, stamp, titles };
     }
-    return cache.__cueCodexTitles.titles.get(sessionId);
+    return cache.__queCodexTitles.titles.get(sessionId);
   } catch { return undefined; }
 }
 
@@ -28,7 +28,7 @@ export async function codexSessionTitle(sessionId: string): Promise<string | und
 export async function resolveCodexSessionPrefix(prefix: string): Promise<string | undefined> {
   if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{5}$/i.test(prefix)) return undefined;
   await codexSessionTitle("");
-  const matches = new Set([...cache.__cueCodexTitles?.titles.keys() ?? []].filter(id => id.startsWith(prefix)));
+  const matches = new Set([...cache.__queCodexTitles?.titles.keys() ?? []].filter(id => id.startsWith(prefix)));
   const home = process.env.CODEX_HOME || join(homedir(), ".codex");
   for (const directory of ["sessions", "archived_sessions"]) {
     try {

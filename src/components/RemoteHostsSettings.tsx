@@ -66,8 +66,8 @@ export function RemoteHostsSettings() {
     setAuthHost(host); setAuthError(null); auth.clear();
     setTestingHosts(current => new Set(current).add(host.id));
     setHostTests(current => { const next = { ...current }; delete next[host.id]; return next; });
-    try { await machineRequest({ action: 'test-host', host: host.id, ...(password !== undefined ? { password } : {}), ...(trustedPrompt !== undefined ? { trustedPrompt } : {}) }); setHostTests(current => ({ ...current, [host.id]: { ok: true } })); setHosts(current => current.map(item => item.id === host.id ? { ...item, connected: true } : item)); window.dispatchEvent(new Event('cue-remote-hosts-changed')); setAuthHost(null); }
-    catch (e) { setHosts(current => current.map(item => item.id === host.id ? { ...item, connected: false } : item)); window.dispatchEvent(new Event('cue-remote-hosts-changed')); if (auth.present(e)) setAuthError(e); else { setHostTests(current => ({ ...current, [host.id]: { ok: false, error: e } })); setAuthHost(null); } }
+    try { await machineRequest({ action: 'test-host', host: host.id, ...(password !== undefined ? { password } : {}), ...(trustedPrompt !== undefined ? { trustedPrompt } : {}) }); setHostTests(current => ({ ...current, [host.id]: { ok: true } })); setHosts(current => current.map(item => item.id === host.id ? { ...item, connected: true } : item)); window.dispatchEvent(new Event('que-remote-hosts-changed')); setAuthHost(null); }
+    catch (e) { setHosts(current => current.map(item => item.id === host.id ? { ...item, connected: false } : item)); window.dispatchEvent(new Event('que-remote-hosts-changed')); if (auth.present(e)) setAuthError(e); else { setHostTests(current => ({ ...current, [host.id]: { ok: false, error: e } })); setAuthHost(null); } }
     finally { setTestingHosts(current => { const next = new Set(current); next.delete(host.id); return next; }); }
   };
   const setHostVisibility = async (host: RemoteHost, visible: boolean) => {
@@ -76,7 +76,7 @@ export function RemoteHostsSettings() {
     setError(null);
     try {
       await machineRequest({ action: 'set-visibility', host: host.id, visible });
-      window.dispatchEvent(new Event('cue-remote-hosts-changed'));
+      window.dispatchEvent(new Event('que-remote-hosts-changed'));
     } catch (e) {
       setHosts(current => current.map(item => item.id === host.id ? { ...item, visible: !visible } : item));
       setError(e);

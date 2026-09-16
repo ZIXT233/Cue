@@ -169,23 +169,23 @@ impl Host {
     pub fn base_env(&self, directory: &Path) -> HashMap<String, String> {
         let mut env = HashMap::new();
         if self.remote {
-            env.insert("CUE_HARNESS_CHANNEL".into(), self.token.clone());
+            env.insert("QUE_HARNESS_CHANNEL".into(), self.token.clone());
         }
         // A remote Cursor reports into this token's cards folder; every other harness
         // owns the signal dir the launcher created for it.
         let signal_dir = if self.remote { self.harness.remote_signal_dir(self) } else { None };
-        env.insert("CUE_HARNESS_SIGNAL_DIR".into(), signal_dir.unwrap_or_else(|| directory.to_string_lossy().into_owned()));
-        env.insert("CUE_HARNESS_KIND".into(), self.kind.clone());
+        env.insert("QUE_HARNESS_SIGNAL_DIR".into(), signal_dir.unwrap_or_else(|| directory.to_string_lossy().into_owned()));
+        env.insert("QUE_HARNESS_KIND".into(), self.kind.clone());
         // Fire the hook's internal watchdog before the runner's kill deadline.
-        env.insert("CUE_HARNESS_WATCHDOG_MS".into(), ((self.timeout - 2).max(1) * 1000).to_string());
+        env.insert("QUE_HARNESS_WATCHDOG_MS".into(), ((self.timeout - 2).max(1) * 1000).to_string());
         if crate::debuglog::verbose() {
-            env.insert("CUE_HARNESS_DEBUG".into(), "1".into());
+            env.insert("QUE_HARNESS_DEBUG".into(), "1".into());
         }
         env
     }
 }
 
-/// The machine-wide install: the user-level config that serves every session Cue did not
+/// The machine-wide install: the user-level config that serves every session Que did not
 /// launch. There is no token and no per-card signal dir here — the ingress falls back to
 /// the external sink on its own.
 pub struct GlobalCtx {

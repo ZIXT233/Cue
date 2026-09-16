@@ -1193,7 +1193,7 @@ html.dark .cq-inline-tools { --bg-hover: #30362e; --bg-selected: #394036; --text
 
 .cq-archive-skip{display:flex;align-items:flex-start;gap:9px;margin:18px 0 22px;font-size:13px;cursor:pointer}.cq-archive-skip input{width:15px;height:15px;margin:0;flex-shrink:0;accent-color:var(--cq-ink)}.cq-archive-skip span{line-height:15px}.cq-archive-skip small{display:block;margin-top:5px;color:var(--cq-muted);font-size:12px;line-height:1.5}
 
-/* Cue supports the same light/dark contract as Pi Web. Keep these
+/* Que supports the same light/dark contract as Pi Web. Keep these
    overrides last because the v2 treatment above intentionally refines many
    of the original light-only component surfaces. */
 html.dark .cq-shell {
@@ -1639,13 +1639,13 @@ html.dark .cq-explorer-heading [aria-pressed="true"] {
 /* Native window controls sit over this application-colored drag region. */
 .desktop-window-chrome { height: 36px; flex: 0 0 36px; background: #f1f2ef; -webkit-app-region: drag; app-region: drag; user-select: none; }
 html.dark .desktop-window-chrome { background: #191c1a; }
-html.cue-desktop .cq-shell { height: calc(100dvh - 36px); }
-html.cue-desktop .cq-shell :is(button, input, textarea, select, a) { -webkit-app-region: no-drag; app-region: no-drag; }
+html.que-desktop .cq-shell { height: calc(100dvh - 36px); }
+html.que-desktop .cq-shell :is(button, input, textarea, select, a) { -webkit-app-region: no-drag; app-region: no-drag; }
 /* Only the toolbar strip is draggable; card gestures remain native scrolling. */
-html.cue-desktop .cq-content-drag {
+html.que-desktop .cq-content-drag {
   position: absolute; top: 0; left: 0; right: 0; height: 48px; z-index: 40;
 }
-html.cue-desktop :is(.cq-content-toolbar, .cq-card-search) {
+html.que-desktop :is(.cq-content-toolbar, .cq-card-search) {
   z-index: 50; -webkit-app-region: no-drag; app-region: no-drag; pointer-events: auto;
 }
 
@@ -1656,20 +1656,20 @@ html[data-desktop-platform="darwin"] .desktop-window-chrome {
   position: fixed; top: 0; left: 0; width: 112px; height: 50px;
   z-index: 1000; background: transparent;
 }
-html.cue-desktop .desktop-drag-sidebar {
+html.que-desktop .desktop-drag-sidebar {
   position: fixed; top: 0; left: 0; width: 246px; height: 50px; z-index: 30;
 }
 @media (max-width: 1050px) {
-  html.cue-desktop .desktop-drag-sidebar { width: 210px; }
+  html.que-desktop .desktop-drag-sidebar { width: 210px; }
 }
-html.cue-desktop .cq-shell { height: 100dvh; }
-html.cue-desktop .cq-sidebar { padding-top: 60px; }
-html.cue-desktop .cq-task-left { padding-top: 60px; }
-html.cue-desktop :is(.cq-sidebar, .cq-task-left)::before {
+html.que-desktop .cq-shell { height: 100dvh; }
+html.que-desktop .cq-sidebar { padding-top: 60px; }
+html.que-desktop .cq-task-left { padding-top: 60px; }
+html.que-desktop :is(.cq-sidebar, .cq-task-left)::before {
   content: ""; position: absolute; top: 0; left: 0; right: 0; height: 42px;
   -webkit-app-region: drag; app-region: drag;
 }
-html.cue-desktop .cq-task-left-drag {
+html.que-desktop .cq-task-left-drag {
   display: block; top: 0; bottom: auto; height: 42px; z-index: 1;
 }
 html[data-desktop-platform="darwin"] .cq-detached-layout:not(:has(.cq-task-left.sidebar-open)) .cq-card-header {
@@ -1693,22 +1693,22 @@ html[data-desktop-platform="darwin"] .cq-detached .cq-task-panel-heading button 
 }
 
 /* Windows/Linux are frameless too; the in-app controls live in the reserved top-right zone. */
-html.cue-desktop:not([data-desktop-platform="darwin"]) .desktop-window-chrome {
+html.que-desktop:not([data-desktop-platform="darwin"]) .desktop-window-chrome {
   position: fixed; top: 0; right: 0; width: 150px; height: 64px;
   z-index: 1000; background: transparent;
 }
-html.cue-desktop:not([data-desktop-platform="darwin"]) .cq-card-search {
+html.que-desktop:not([data-desktop-platform="darwin"]) .cq-card-search {
   left: 50%; right: auto; transform: translateX(-50%);
   width: var(--cq-search-width, min(460px, max(100px, calc(100% - 320px))));
 }
-html.cue-desktop:not([data-desktop-platform="darwin"]) .cq-detached .cq-card-header {
+html.que-desktop:not([data-desktop-platform="darwin"]) .cq-detached .cq-card-header {
   padding-right: 160px;
 }
 /* Detached card windows on Windows/Linux need the same drag affordances as macOS. */
-html.cue-desktop:not([data-desktop-platform="darwin"]) .cq-detached .cq-card-header,
-html.cue-desktop:not([data-desktop-platform="darwin"]) .cq-detached .cq-task-panel-heading,
-html.cue-desktop:not([data-desktop-platform="darwin"]) .cq-detached .cq-detached-window-drag,
-html.cue-desktop:not([data-desktop-platform="darwin"]) .cq-detached .cq-detached-drag {
+html.que-desktop:not([data-desktop-platform="darwin"]) .cq-detached .cq-card-header,
+html.que-desktop:not([data-desktop-platform="darwin"]) .cq-detached .cq-task-panel-heading,
+html.que-desktop:not([data-desktop-platform="darwin"]) .cq-detached .cq-detached-window-drag,
+html.que-desktop:not([data-desktop-platform="darwin"]) .cq-detached .cq-detached-drag {
   -webkit-app-region: drag;
   app-region: drag;
 }

@@ -132,7 +132,7 @@ pub struct UserMerge {
     /// The file under the plugin root carrying this harness's payload.
     pub payload: &'static str,
     /// Local install: the file's current text (`None` when absent) and the payload
-    /// become the new text. Refusing to touch a file Cue does not own is the merge's
+    /// become the new text. Refusing to touch a file Que does not own is the merge's
     /// job, not the installer's.
     pub local: fn(existing: Option<&str>, payload: &str, host: &Host) -> AppResult<String>,
     /// Remote install: a `node -e` script plus the argv that follows it.
@@ -162,7 +162,7 @@ impl VersionGate {
 pub struct LaunchTweaks {
     /// Pin the canvas dark regardless of the app theme (Grok paints its own).
     pub dark_canvas: bool,
-    /// Fake a Kitty environment so the CLI picks the notification channel Cue reads.
+    /// Fake a Kitty environment so the CLI picks the notification channel Que reads.
     pub kitty_notifications: bool,
     /// Windows: launch node on the CLI's script directly, skipping the `.cmd` shim.
     pub windows_direct_launch: bool,
@@ -170,7 +170,7 @@ pub struct LaunchTweaks {
     pub ssh_unset: &'static [&'static str],
 }
 
-/// Everything Cue knows about one harness, in one place.
+/// Everything Que knows about one harness, in one place.
 pub trait Harness: Sync {
     /// The canonical kind string: what cards carry and what `find` looks up.
     fn id(&self) -> &'static str;
@@ -207,12 +207,12 @@ pub trait Harness: Sync {
     fn plan<'a>(&'a self, _ctx: Ctx<'a>) -> Pin<Box<dyn Future<Output = AppResult<Plan>> + Send + 'a>> {
         Box::pin(async { Ok(Plan::default()) })
     }
-    /// The user-level install serving sessions Cue never launched. Default: none.
+    /// The user-level install serving sessions Que never launched. Default: none.
     fn global(&self, _ctx: &GlobalCtx) {}
 
     /// Where the plugin root lands on a remote host.
     fn remote_root(&self, home: &str, token: &str, _ingress_sha: &str) -> String {
-        format!("{home}/.cache/cue/harness/{token}")
+        format!("{home}/.cache/que/harness/{token}")
     }
     /// The hook deadline the CLI is told about, in seconds.
     fn hook_timeout(&self, windows_local: bool) -> u32 {
@@ -310,7 +310,7 @@ pub trait Harness: Sync {
     }
 
     // —— external ingress ——
-    /// Whether this harness serves sessions Cue never launched under its own settings
+    /// Whether this harness serves sessions Que never launched under its own settings
     /// key. Family members covered by their host's key are `false`.
     fn external_ingress(&self) -> bool {
         false

@@ -1,4 +1,4 @@
-//! Sessions Cue never launched.
+//! Sessions Que never launched.
 //!
 //! Cursor's user-level `hooks.json` is global, so the same ingress also fires for
 //! IDE chats and terminals this app has no terminal id for. Those sessions are not
@@ -392,7 +392,7 @@ mod tests {
             at,
             event: event.into(),
             session_id: Some(SESSION.into()),
-            workspace_root: Some("/home/u/Projects/cue".into()),
+            workspace_root: Some("/home/u/Projects/que".into()),
             external: Some(true),
             ..HookSignal::default()
         }
@@ -436,7 +436,7 @@ mod tests {
         let at = now();
         assert!(apply(&probes, &notices, signal("stop", at)));
         let raised = only(&notices);
-        assert_eq!(raised.project.as_deref(), Some("cue"));
+        assert_eq!(raised.project.as_deref(), Some("que"));
         assert_eq!(raised.state, "attention");
         assert_eq!(raised.id, SESSION);
         // The same attention event must not churn the notice (and its SSE refresh).
@@ -486,7 +486,7 @@ mod tests {
         let entry = only(&notices);
         assert_eq!(entry.state, "working");
         assert_eq!(entry.kind, "cursor");
-        assert_eq!(entry.project.as_deref(), Some("cue"));
+        assert_eq!(entry.project.as_deref(), Some("que"));
         // Nothing asked yet, so there is nothing to show but who it is.
         assert_eq!(entry.prompt, None);
         assert_eq!(entry.preview, None);
@@ -543,12 +543,12 @@ mod tests {
     fn hook_workspace_names_the_card() {
         let mut reported = signal("stop", now());
         reported.session_id = None;
-        reported.workspace_root = Some("/home/u/Projects/cue".into());
+        reported.workspace_root = Some("/home/u/Projects/que".into());
         let (probes, notices) = store();
         assert!(apply(&probes, &notices, reported));
         let raised = only(&notices);
-        assert_eq!(raised.project.as_deref(), Some("cue"));
-        assert_eq!(raised.cwd.as_deref(), Some("/home/u/Projects/cue"));
+        assert_eq!(raised.project.as_deref(), Some("que"));
+        assert_eq!(raised.cwd.as_deref(), Some("/home/u/Projects/que"));
     }
 
     #[test]
@@ -581,13 +581,13 @@ mod tests {
         let mut anonymous = signal("stop", now());
         anonymous.session_id = None;
         assert!(apply(&probes, &notices, anonymous));
-        assert_eq!(notices.lock().keys().next().map(String::as_str), Some("path:/home/u/Projects/cue"));
+        assert_eq!(notices.lock().keys().next().map(String::as_str), Some("path:/home/u/Projects/que"));
     }
 
     #[test]
     fn project_is_the_last_path_segment() {
-        assert_eq!(project_name("/home/u/Projects/cue").as_deref(), Some("cue"));
-        assert_eq!(project_name(r"C:\Users\u\Projects\cue\\").as_deref(), Some("cue"));
+        assert_eq!(project_name("/home/u/Projects/que").as_deref(), Some("que"));
+        assert_eq!(project_name(r"C:\Users\u\Projects\que\\").as_deref(), Some("que"));
         assert_eq!(project_name("/"), None);
     }
 

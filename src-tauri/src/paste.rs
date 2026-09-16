@@ -140,14 +140,14 @@ fn write_exclusive(path: &Path, bytes: &[u8]) -> AppResult<()> {
 pub async fn save_terminal_images(cwd: &str, images: &[Value]) -> AppResult<Vec<String>> {
     let remote = load_ssh_workspace(cwd)?;
     let directory = if let Some(remote) = &remote {
-        let dir = String::from_utf8_lossy(&ssh_exec(&remote.ssh_host, "umask 077; mktemp -d /tmp/cue-images-XXXXXXXX").await?).trim().to_string();
+        let dir = String::from_utf8_lossy(&ssh_exec(&remote.ssh_host, "umask 077; mktemp -d /tmp/que-images-XXXXXXXX").await?).trim().to_string();
         if !dir.starts_with('/') && !cfg!(windows) {
             return Err(AppError::msg("Invalid image directory"));
         }
         dir
     } else {
         tempfile::Builder::new()
-            .prefix("cue-images-")
+            .prefix("que-images-")
             .tempdir()
             .map_err(|e| AppError::msg(e.to_string()))?
             .keep()
@@ -175,14 +175,14 @@ pub async fn save_terminal_images(cwd: &str, images: &[Value]) -> AppResult<Vec<
 pub async fn save_terminal_files(cwd: &str, files: &[(String, Vec<u8>)]) -> AppResult<Vec<String>> {
     let remote = load_ssh_workspace(cwd)?;
     let directory = if let Some(remote) = &remote {
-        let dir = String::from_utf8_lossy(&ssh_exec(&remote.ssh_host, "umask 077; mktemp -d /tmp/cue-files-XXXXXXXX").await?).trim().to_string();
-        if !regex::Regex::new(r"^/tmp/cue-files-[a-zA-Z0-9]+$").unwrap().is_match(&dir) {
+        let dir = String::from_utf8_lossy(&ssh_exec(&remote.ssh_host, "umask 077; mktemp -d /tmp/que-files-XXXXXXXX").await?).trim().to_string();
+        if !regex::Regex::new(r"^/tmp/que-files-[a-zA-Z0-9]+$").unwrap().is_match(&dir) {
             return Err(AppError::msg("Invalid remote upload directory"));
         }
         dir
     } else {
         tempfile::Builder::new()
-            .prefix("cue-files-")
+            .prefix("que-files-")
             .tempdir()
             .map_err(|e| AppError::msg(e.to_string()))?
             .keep()

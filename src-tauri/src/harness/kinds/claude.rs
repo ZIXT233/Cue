@@ -31,7 +31,7 @@ pub(super) async fn family_plan(ctx: Ctx<'_>, events: &'static [&'static str]) -
     let mut plan = Plan::default();
     plan.files.insert(
         format!("{}/plugin.json", manifest_dir(ctx.kind)),
-        serde_json::json!({ "name": "cue-session-state", "version": "1.0.0", "description": "Report this Cue terminal's lifecycle" }).to_string(),
+        serde_json::json!({ "name": "que-session-state", "version": "1.0.0", "description": "Report this Que terminal's lifecycle" }).to_string(),
     );
     let command = ctx.host.command(None);
     let mut hooks = serde_json::Map::new();
@@ -65,7 +65,7 @@ impl Harness for Claude {
         Box::pin(family_plan(ctx, self.events()))
     }
 
-    /// What a Claude session Cue never launched needs: its own ingress, and Cue's
+    /// What a Claude session Que never launched needs: its own ingress, and Que's
     /// entries merged into `~/.claude/settings.json`.
     fn global(&self, ctx: &GlobalCtx) {
         let _ = ctx.install_ingress("claude");
@@ -94,7 +94,7 @@ impl Harness for Claude {
         if let Some(obj) = value.as_object_mut() {
             let mut hooks = obj.get("hooks").and_then(|h| h.as_object()).cloned().unwrap_or_default();
             for &event in self.events() {
-                // Keep whatever the user wrote there; replace only Cue's own entries.
+                // Keep whatever the user wrote there; replace only Que's own entries.
                 let mut entries: Vec<serde_json::Value> = hooks.get(event).and_then(|v| v.as_array()).cloned().unwrap_or_default();
                 entries.retain(|group| {
                     let text = group.to_string();

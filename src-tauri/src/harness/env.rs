@@ -3,8 +3,8 @@ use crate::winproc::NoWindow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-const START: &str = "__CUE_ENV_START__";
-const END: &str = "__CUE_ENV_END__";
+const START: &str = "__QUE_ENV_START__";
+const END: &str = "__QUE_ENV_END__";
 
 /// The dump spawns PowerShell (Windows) or a login shell (Unix) and costs
 /// seconds per call; the result only seeds child env and command resolution,

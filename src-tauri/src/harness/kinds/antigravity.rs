@@ -1,7 +1,7 @@
 //! Antigravity and Gemini.
 //!
-//! They share `~/.gemini`, so the same guard protects the file both write into: Cue's
-//! bundle lives under its own `cue-session-state` key, and a key already owned by
+//! They share `~/.gemini`, so the same guard protects the file both write into: Que's
+//! bundle lives under its own `que-session-state` key, and a key already owned by
 //! someone else is never overwritten. Gemini is its own CLI over that same config
 //! directory, with its own event names and defaults file — so it is a harness of its
 //! own here, keyed for settings under Antigravity's external-ingress entry.
@@ -24,8 +24,8 @@ const EVENTS: &[&str] = &["PreInvocation", "PostInvocation", "PreToolUse", "Post
 /// Gemini reports its own lifecycle through different names than Antigravity's CLI.
 const GEMINI_EVENTS: &[&str] = &["SessionStart", "BeforeAgent", "AfterAgent", "BeforeTool", "AfterTool", "Notification"];
 
-/// Merges Cue's bundle into `~/.gemini/config/hooks.json` on a remote host.
-const SSH_MERGE: &str = r#"const fs=require("node:fs"),p=require("node:path"),dest=process.argv[1],src=process.argv[2];const x=fs.existsSync(dest)?JSON.parse(fs.readFileSync(dest,"utf8")):{};if(x["cue-session-state"]&&!JSON.stringify(x["cue-session-state"]).includes("/cue/"))throw Error("Hook name already owned");x["cue-session-state"]=JSON.parse(fs.readFileSync(src,"utf8"));fs.mkdirSync(p.dirname(dest),{recursive:true});fs.writeFileSync(dest+".cue.tmp",JSON.stringify(x,null,2),{mode:384});fs.renameSync(dest+".cue.tmp",dest);"#;
+/// Merges Que's bundle into `~/.gemini/config/hooks.json` on a remote host.
+const SSH_MERGE: &str = r#"const fs=require("node:fs"),p=require("node:path"),dest=process.argv[1],src=process.argv[2];const x=fs.existsSync(dest)?JSON.parse(fs.readFileSync(dest,"utf8")):{};if(x["que-session-state"]&&!JSON.stringify(x["que-session-state"]).includes("/que/"))throw Error("Hook name already owned");x["que-session-state"]=JSON.parse(fs.readFileSync(src,"utf8"));fs.mkdirSync(p.dirname(dest),{recursive:true});fs.writeFileSync(dest+".que.tmp",JSON.stringify(x,null,2),{mode:384});fs.renameSync(dest+".que.tmp",dest);"#;
 
 fn resume_args(session_id: &str) -> AppResult<Vec<String>> {
     Ok(vec!["--conversation".into(), checked_id(session_id)?.into()])
@@ -69,7 +69,7 @@ async fn gemini_plan(ctx: Ctx<'_>, events: &'static [&'static str]) -> AppResult
     for &event in events {
         let mut entries = hooks.get(event).and_then(|v| v.as_array()).cloned().unwrap_or_default();
         entries.push(serde_json::json!({
-            "hooks": [{ "type": "command", "name": format!("cue-{event}"), "command": command, "timeout": timeout_ms }]
+            "hooks": [{ "type": "command", "name": format!("que-{event}"), "command": command, "timeout": timeout_ms }]
         }));
         hooks.insert(event.into(), serde_json::Value::Array(entries));
     }
@@ -80,11 +80,11 @@ async fn gemini_plan(ctx: Ctx<'_>, events: &'static [&'static str]) -> AppResult
 }
 
 /// Local install of the shared config: read what is there, refusing to touch a
-/// `cue-session-state` key Cue does not own, then set Cue's bundle under its key.
+/// `que-session-state` key Que does not own, then set Que's bundle under its key.
 fn merge_local(existing: Option<&str>, payload: &str, host: &Host) -> AppResult<String> {
     let mut config = guard(existing, &|event: &str| host.command(Some(event)))?;
     if let Some(obj) = config.as_object_mut() {
-        obj.insert("cue-session-state".into(), serde_json::from_str(payload)?);
+        obj.insert("que-session-state".into(), serde_json::from_str(payload)?);
     }
     serde_json::to_string_pretty(&config).map_err(Into::into)
 }
@@ -113,7 +113,7 @@ impl Harness for Antigravity {
         Box::pin(antigravity_plan(ctx, self.events()))
     }
 
-    /// What an Antigravity session Cue never launched needs: its own ingress, and Cue's
+    /// What an Antigravity session Que never launched needs: its own ingress, and Que's
     /// bundle under the key it owns in the shared `~/.gemini` config.
     fn global(&self, ctx: &GlobalCtx) {
         let _ = ctx.install_ingress("antigravity");
@@ -134,7 +134,7 @@ impl Harness for Antigravity {
             .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
             .unwrap_or_else(|| serde_json::json!({}));
         if let Some(mut obj) = existing.as_object().cloned() {
-            obj.insert("cue-session-state".into(), serde_json::Value::Object(bundle));
+            obj.insert("que-session-state".into(), serde_json::Value::Object(bundle));
             if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); }
             let _ = atomic_write(&path, &serde_json::to_string_pretty(&serde_json::Value::Object(obj)).unwrap_or_default());
         }
@@ -311,7 +311,7 @@ fn antigravity_session_details(session_id: &str) -> Option<AntigravitySessionDet
     })
 }
 
-/// A `cue-session-state` bundle is Cue's when every definition in it names a known
+/// A `que-session-state` bundle is Que's when every definition in it names a known
 /// event and a handler that runs this hook.
 fn is_owned(existing: &serde_json::Value, command_for: &dyn Fn(&str) -> String) -> bool {
     let Some(obj) = existing.as_object() else { return false };
@@ -331,7 +331,7 @@ fn is_owned(existing: &serde_json::Value, command_for: &dyn Fn(&str) -> String) 
                                 && handlers.iter().all(|handler| {
                                     handler.get("command").and_then(|c| c.as_str()).is_some_and(|command| {
                                         command == command_for(event)
-                                            || regex::Regex::new(r#"[\\/]\.cue[\\/]harness-plugins[\\/]antigravity[\\/]hook\.cjs["']"#)
+                                            || regex::Regex::new(r#"[\\/]\.que[\\/]harness-plugins[\\/]antigravity[\\/]hook\.cjs["']"#)
                                                 .unwrap()
                                                 .is_match(command)
                                     })
@@ -341,7 +341,7 @@ fn is_owned(existing: &serde_json::Value, command_for: &dyn Fn(&str) -> String) 
         })
 }
 
-/// Read the shared config, refusing to touch a `cue-session-state` key Cue does not own.
+/// Read the shared config, refusing to touch a `que-session-state` key Que does not own.
 fn guard(existing: Option<&str>, command_for: &dyn Fn(&str) -> String) -> AppResult<serde_json::Value> {
     let config = match existing {
         Some(raw) => serde_json::from_str(raw)?,
@@ -350,7 +350,7 @@ fn guard(existing: Option<&str>, command_for: &dyn Fn(&str) -> String) -> AppRes
     if !config.is_object() || config.is_array() {
         return Err(AppError::machine_detail("HARNESS_HOOKS_INVALID", "antigravity"));
     }
-    if let Some(existing) = config.get("cue-session-state") {
+    if let Some(existing) = config.get("que-session-state") {
         if !is_owned(existing, command_for) {
             return Err(AppError::machine_detail("HARNESS_HOOKS_FOREIGN", "antigravity"));
         }

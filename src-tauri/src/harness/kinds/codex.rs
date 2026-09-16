@@ -19,7 +19,7 @@ const EVENTS: &[&str] = &[
     "SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "Stop",
 ];
 
-/// Pin the TUI to the title and notification channel Cue reads back.
+/// Pin the TUI to the title and notification channel Que reads back.
 const ARGS: &[&str] = &[
     "-c", r#"tui.terminal_title=["app-name","status","spinner","session-id"]"#,
     "-c", r#"tui.notifications=["plan-mode-prompt","approval-requested"]"#,
@@ -36,7 +36,7 @@ fn resume_args(session_id: &str) -> AppResult<Vec<String>> {
     Ok(vec!["resume".into(), id.into()])
 }
 
-/// Cue's entries in the CLI's own config are recognised by the ingress path they run.
+/// Que's entries in the CLI's own config are recognised by the ingress path they run.
 /// That is how an earlier install is told apart from hooks the user wrote themselves.
 const MARKER: [&str; 2] = ["harness-plugins/codex/hook.cjs", "harness-plugins\\codex\\hook.cjs"];
 
@@ -69,7 +69,7 @@ impl Harness for Codex {
     /// same script version must land at the same address: the cache dir carries the
     /// digest, not the card's token.
     fn remote_root(&self, home: &str, _token: &str, ingress_sha: &str) -> String {
-        format!("{home}/.cache/cue/harness-plugins/codex/{ingress_sha}")
+        format!("{home}/.cache/que/harness-plugins/codex/{ingress_sha}")
     }
 
     fn events(&self) -> &'static [&'static str] {
@@ -80,7 +80,7 @@ impl Harness for Codex {
         Box::pin(plan(ctx, self.events()))
     }
 
-    /// What a Codex session Cue never launched needs: its own ingress, and a
+    /// What a Codex session Que never launched needs: its own ingress, and a
     /// `config.toml` that registers the hooks. Codex has no config *file* for hooks
     /// otherwise.
     fn global(&self, ctx: &GlobalCtx) {
@@ -93,7 +93,7 @@ impl Harness for Codex {
         let existing = std::fs::read_to_string(&config).unwrap_or_default();
         if MARKER.iter().any(|marker| existing.contains(marker)) {
             // Already registered by an earlier run: appending again would double every
-            // event. It can still be the *shape* an earlier Cue wrote, though — that one
+            // event. It can still be the *shape* an earlier Que wrote, though — that one
             // has to be rewritten in place, or Codex keeps refusing to load the file and
             // the user cannot even reach the prompt that would trust these hooks.
             let repaired = repair_headers(&existing, self.events());
@@ -109,7 +109,7 @@ impl Harness for Codex {
         }
         to_append.push_str(&registration_block(&cmd, self.events()));
         // The user's own config, written atomically: a torn write here costs them every
-        // Codex session, not just Cue's entries.
+        // Codex session, not just Que's entries.
         let _ = atomic_write(&config, &format!("{existing}\n{to_append}"));
     }
 
@@ -525,25 +525,25 @@ fn codex_session_details(session_id: &str) -> Option<CodexSessionDetails> {
     })
 }
 
-/// The hooks Cue registers, in the shape Codex parses.
+/// The hooks Que registers, in the shape Codex parses.
 ///
 /// Every event is an **array of matcher groups** — `[[hooks.PreToolUse]]` — and not a
 /// table. With a single-bracket header the event key holds a map where Codex wants a
 /// sequence, which it reports as `invalid type: map, expected a sequence in 'hooks'`
 /// and treats as a reason to reject the *whole* config file.
 fn registration_block(cmd: &str, events: &'static [&'static str]) -> String {
-    let mut out = String::from("\n# Cue session state hook\n");
+    let mut out = String::from("\n# Que session state hook\n");
     for &event in events {
         out.push_str(&format!("[[hooks.{event}]]\nhooks = [{{ type = \"command\", command = {:?}, timeout = 2 }}]\n", cmd));
     }
     out
 }
 
-/// Rewrite the headers an earlier Cue wrote as tables into the arrays Codex wants.
+/// Rewrite the headers an earlier Que wrote as tables into the arrays Codex wants.
 ///
 /// Only the header moves: the `hooks = [...]` line beneath it is already the body of
 /// the group, so the entry keeps doing exactly what it did. Everything else in the
-/// file is left byte for byte — this is the user's config, and Cue is only a guest in
+/// file is left byte for byte — this is the user's config, and Que is only a guest in
 /// it. Matching on the newline on both sides is what keeps `[[hooks.Stop]]` (already
 /// right) from being bracketed a third time.
 fn repair_headers(existing: &str, events: &'static [&'static str]) -> String {
@@ -564,10 +564,10 @@ mod tests {
     use super::*;
 
     /// Asserted per event, because one table among five arrays is enough to make Codex
-    /// reject the file — and the failure then looks like a Cue problem, not a typo.
+    /// reject the file — and the failure then looks like a Que problem, not a typo.
     #[test]
     fn registered_events_are_arrays_of_groups() {
-        let block = registration_block("/usr/bin/node \"/tmp/cue/hook.cjs\"", EVENTS);
+        let block = registration_block("/usr/bin/node \"/tmp/que/hook.cjs\"", EVENTS);
         for &event in EVENTS {
             assert!(block.contains(&format!("[[hooks.{event}]]\n")), "{event} must be an array of tables");
             assert!(!block.contains(&format!("\n[hooks.{event}]\n")), "{event} must not be a table");
@@ -579,7 +579,7 @@ mod tests {
     #[test]
     fn table_headers_from_an_earlier_install_are_repaired() {
         let entry = "hooks = [{ type = \"command\", command = \"node\", timeout = 2 }]";
-        let broken = format!("\n# Cue session state hook\n[hooks.Stop]\n{entry}\n");
+        let broken = format!("\n# Que session state hook\n[hooks.Stop]\n{entry}\n");
         let fixed = repair_headers(&broken, EVENTS);
         assert!(fixed.contains("\n[[hooks.Stop]]\n"));
         assert!(!fixed.contains("\n[hooks.Stop]\n"));
@@ -590,7 +590,7 @@ mod tests {
         assert_eq!(repair_headers(&block, EVENTS), block);
     }
 
-    /// Anything that is not Cue's own header is left exactly as it was — including the
+    /// Anything that is not Que's own header is left exactly as it was — including the
     /// CLI's own `[hooks.state]` tables, which live under the same key.
     #[test]
     fn a_repair_touches_nothing_else() {

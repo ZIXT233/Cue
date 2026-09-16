@@ -6,8 +6,8 @@ type LaunchAction = "harness_start" | "harness_reopen" | "harness_restart" | "ha
 export function isHarnessLaunchAction(action: unknown): action is LaunchAction {
   return ["harness_start", "harness_reopen", "harness_restart", "harness_resume"].includes(String(action));
 }
-const globals = globalThis as typeof globalThis & { __cueCardLaunches?: Set<string> };
-const launches = globals.__cueCardLaunches ??= new Set<string>();
+const globals = globalThis as typeof globalThis & { __queCardLaunches?: Set<string> };
+const launches = globals.__queCardLaunches ??= new Set<string>();
 type Dependencies = {
   sync: (state: CardQueue) => Promise<unknown>;
   launch: (kind: unknown, workspace: QueueWorkspace, resume?: HarnessSession) => Promise<HarnessSession>;

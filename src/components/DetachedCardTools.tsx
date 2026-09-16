@@ -50,7 +50,7 @@ export function DetachedCardTools({ children, cardId, cwd, remoteShell, saved, s
     growthDirection: "left",
     maxWidth: RIGHT_PANEL_MAX_WIDTH,
     minWidth: RIGHT_PANEL_MIN_WIDTH,
-    storageKey: "cue:card-side-terminal-width",
+    storageKey: "que:card-side-terminal-width",
     widthRef: rightWidth,
   });
   useEffect(() => { if (rightPanel) lastRightPanel.current = rightPanel; }, [rightPanel]);

@@ -8,7 +8,7 @@ export const TERMINAL_BACKGROUND_OPTIONS = [
 
 export type TerminalBackground = (typeof TERMINAL_BACKGROUND_OPTIONS)[number]["id"];
 
-export const TERMINAL_BACKGROUND_KEY = "cue-terminal-bg";
+export const TERMINAL_BACKGROUND_KEY = "que-terminal-bg";
 
 export function isTerminalBackground(value: unknown): value is TerminalBackground {
   return TERMINAL_BACKGROUND_OPTIONS.some((option) => option.id === value);

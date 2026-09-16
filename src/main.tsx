@@ -7,7 +7,7 @@ import { CardQueueShell } from "./components/CardQueueShell";
 import { DesktopChrome } from "./components/DesktopChrome";
 import { I18nProvider } from "./hooks/useI18n";
 import { openDetachedCardWindow } from "./lib/card-window";
-import type { CueDesktop } from "./lib/desktop";
+import type { QueDesktop } from "./lib/desktop";
 import { setDeveloperProbesEnabled } from "./lib/developer-probes";
 import { installFrontendLogBridge } from "./lib/app-log";
 import { installApiInterceptor, setApiBase } from "./lib/http";
@@ -16,7 +16,7 @@ import "./styles/settings.css";
 import "./styles/card-queue.css";
 
 function installDesktopBridge() {
-  const desktop: CueDesktop = {
+  const desktop: QueDesktop = {
     storage: window.localStorage,
     platform: navigator.userAgent.includes("Mac") ? "darwin" : navigator.userAgent.includes("Win") ? "win32" : "linux",
     owner: crypto.randomUUID(),
@@ -31,7 +31,7 @@ function installDesktopBridge() {
     openCard: (cardId) => openDetachedCardWindow(cardId),
     focus: () => window.focus(),
     openNotification: (url) => {
-      window.dispatchEvent(new CustomEvent("cue:notification-click", { detail: { url } }));
+      window.dispatchEvent(new CustomEvent("que:notification-click", { detail: { url } }));
     },
     requestNotifications: async () => {
       if (await isPermissionGranted()) return "granted";
@@ -48,8 +48,8 @@ function installDesktopBridge() {
       }
     },
   };
-  window.cueDesktop = desktop;
-  document.documentElement.classList.add("cue-desktop");
+  window.queDesktop = desktop;
+  document.documentElement.classList.add("que-desktop");
   document.documentElement.dataset.desktopPlatform = desktop.platform;
 }
 
@@ -59,7 +59,7 @@ async function boot() {
   setApiBase(base);
   installApiInterceptor();
   installFrontendLogBridge();
-  window.__CUE_API_BASE__ = base;
+  window.__QUE_API_BASE__ = base;
   try {
     const response = await fetch("/api/tools/settings");
     const data = await response.json() as { developerProbes?: boolean; debugLogging?: boolean };

@@ -67,7 +67,7 @@ function isAskNotification(signal: HookSignal): boolean {
 }
 
 // Event names follow Orca's Codex adapter (MIT, attribution in docs/harness).
-// Cue schedules the interactive root TUI, not a roster of background agents.
+// Que schedules the interactive root TUI, not a roster of background agents.
 /** The one place a harness's vocabulary is read. */
 export function meaningOf(signal: HookSignal): Meaning {
   if (signal.agentId) return "nothing";

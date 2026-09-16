@@ -2,11 +2,11 @@
 
 Archived 2026-09-16. Superseded by "scheme one": the frontend xterm.js instance
 answers terminal queries itself and its replies are written straight back to the
-PTY, so Cue no longer keeps a second responder in the backend.
+PTY, so Que no longer keeps a second responder in the backend.
 
 ## Why this was removed
 
-Cue ran two independent responders for the same probes:
+Que ran two independent responders for the same probes:
 
 - backend `deliver()` matched `ESC ] 10/11/12 ; ?` and wrote an OSC colour reply
 - frontend xterm.js answered DA1 (`ESC [ c`) on its own `onData`
@@ -58,7 +58,7 @@ where the CLI can start probing before the first theme push lands.
 
 ## Addendum: capability replies are withheld
 
-Scheme one alone was not enough. Handing DA1 to xterm made Cue answer correctly,
+Scheme one alone was not enough. Handing DA1 to xterm made Que answer correctly,
 but the reply then travelled `onData` → PTY → and Cursor — the CLI that does the
 probing — did not consume it. It echoed `ESC[?1;2c` onto its own prompt as
 literal text, so the stray `[?1;2c` survived the refactor in a new form.
@@ -87,7 +87,7 @@ What deliberately still flows through:
   also `ESC[`-prefixed, which is why the filter is an exact match plus one narrow
   anchored regex rather than a prefix test.
 
-## Focus reporting: Cue owns it, xterm is silenced
+## Focus reporting: Que owns it, xterm is silenced
 
 `ESC[I` / `ESC[O` were also added to the block list, for a different reason than
 the capability replies: not because they are redundant, but because the two
@@ -96,7 +96,7 @@ producers disagree about what they mean.
 | Producer | Meaning |
 |---|---|
 | xterm (`CoreBrowserTerminal.ts:271/295` on real focus/blur, `:1293` on the initial `?1004h` report) | browser textarea gained / lost focus |
-| Cue (`sendFocusReport`) | this card is / is not in the queue |
+| Que (`sendFocusReport`) | this card is / is not in the queue |
 
 Both write the same two byte sequences. With a CLI that armed DECSET 1004, the
 stream carried whichever source fired last, and the queue semantics — the reading
@@ -112,7 +112,7 @@ the xterm 6.0.0 sources:
 Also worth noting: xterm does not expose a switch to disable focus reporting.
 `decPrivateModes.sendFocus` (`CoreService.ts:24`) is internal and is only flipped
 by the `?1004h`/`?1004l` handlers (`InputHandler.ts:1938`/`:2167`), so filtering
-the emitted sequence is the only place Cue can take ownership without rewriting
+the emitted sequence is the only place Que can take ownership without rewriting
 the output stream on its way into xterm.
 
 

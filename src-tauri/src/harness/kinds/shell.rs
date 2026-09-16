@@ -34,7 +34,7 @@ pub async fn prepare_shell(workspace: &QueueWorkspace, directory: &Path, bin_dir
         if let Some(home) = lines.next() { user_home = Path::new(home).to_path_buf(); }
         if let Some(value) = lines.next() { shell = value.to_string(); }
         if let Some(value) = lines.next() { original_zdotdir = Path::new(value).to_path_buf(); }
-        root = user_home.join(".cache/cue/shell").join(directory.file_name().unwrap_or_default());
+        root = user_home.join(".cache/que/shell").join(directory.file_name().unwrap_or_default());
     }
     let mut files: HashMap<String, String> = HashMap::new();
     let args;
@@ -49,13 +49,13 @@ pub async fn prepare_shell(workspace: &QueueWorkspace, directory: &Path, bin_dir
     } else if name == "zsh" {
         files.insert("integration.sh".into(), std::fs::read_to_string(bin_dir.join("shell/zsh-integration.sh"))?);
         files.insert(".zshenv".into(), format!(
-            "ZDOTDIR={}\n[[ -r \"$ZDOTDIR/.zshenv\" ]] && source \"$ZDOTDIR/.zshenv\"\nexport CUE_USER_ZDOTDIR=\"${{ZDOTDIR:-$HOME}}\"\nexport ZDOTDIR={}\n",
+            "ZDOTDIR={}\n[[ -r \"$ZDOTDIR/.zshenv\" ]] && source \"$ZDOTDIR/.zshenv\"\nexport QUE_USER_ZDOTDIR=\"${{ZDOTDIR:-$HOME}}\"\nexport ZDOTDIR={}\n",
             shell_quote(&original_zdotdir.to_string_lossy()),
             shell_quote(&root.to_string_lossy())
         ));
-        files.insert(".zprofile".into(), "[[ -r \"$CUE_USER_ZDOTDIR/.zprofile\" ]] && source \"$CUE_USER_ZDOTDIR/.zprofile\"\n".into());
+        files.insert(".zprofile".into(), "[[ -r \"$QUE_USER_ZDOTDIR/.zprofile\" ]] && source \"$QUE_USER_ZDOTDIR/.zprofile\"\n".into());
         files.insert(".zshrc".into(), format!(
-            "ZDOTDIR=\"$CUE_USER_ZDOTDIR\"\n[[ -r \"$ZDOTDIR/.zshrc\" ]] && source \"$ZDOTDIR/.zshrc\"\nunset CUE_USER_ZDOTDIR\nsource {}\n",
+            "ZDOTDIR=\"$QUE_USER_ZDOTDIR\"\n[[ -r \"$ZDOTDIR/.zshrc\" ]] && source \"$ZDOTDIR/.zshrc\"\nunset QUE_USER_ZDOTDIR\nsource {}\n",
             shell_quote(&root.join("integration.sh").to_string_lossy())
         ));
         env.insert("ZDOTDIR".into(), root.to_string_lossy().into_owned());

@@ -266,7 +266,7 @@ pub struct RemoteHost {
     pub user: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub port: Option<u16>,
-    /// `IdentityFile` read out of `~/.ssh/config`. Cue talks the SSH protocol
+    /// `IdentityFile` read out of `~/.ssh/config`. Que talks the SSH protocol
     /// itself now, so it has to find the key the user's config points at.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity_file: Option<String>,
@@ -285,7 +285,7 @@ fn default_developer_probes() -> bool {
     false
 }
 
-/// Every harness that serves sessions Cue never launched under its own settings key
+/// Every harness that serves sessions Que never launched under its own settings key
 /// starts enabled; family members covered by their host's key are not listed.
 fn default_external_ingress() -> std::collections::HashMap<String, bool> {
     crate::harness::registry::ALL
