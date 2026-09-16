@@ -130,7 +130,7 @@ async fn post_queue(State(state): State<AppState>, Json(mut body): Json<Value>) 
                     obj.insert("cwd".into(), json!(resolved));
                 }
             } else {
-                return Err(AppError::msg("无法解析远程工作目录"));
+                return Err(AppError::machine("REMOTE_CWD_UNRESOLVABLE"));
             }
         }
     }
@@ -163,7 +163,7 @@ impl Drop for LaunchGuard {
 fn try_acquire_launch(state: &AppState, id: &str) -> AppResult<LaunchGuard> {
     let mut launches = state.launches.lock();
     if !launches.insert(id.to_string()) {
-        return Err(AppError::msg("此卡片正在启动，请等待启动结果"));
+        return Err(AppError::machine("HARNESS_LAUNCH_IN_PROGRESS"));
     }
     Ok(LaunchGuard { launches: state.launches.clone(), id: id.to_string() })
 }
@@ -187,26 +187,26 @@ fn launch_identity_changed(
 }
 
 async fn launch_harness(state: &AppState, body: &Value, action: &str) -> AppResult<CardQueue> {
-    let id = body.get("id").and_then(|v| v.as_str()).ok_or_else(|| AppError::msg("卡片 ID 无效"))?;
+    let id = body.get("id").and_then(|v| v.as_str()).ok_or_else(|| AppError::machine("CARD_ID_INVALID"))?;
     let _guard = try_acquire_launch(state, id)?;
     let captured = state.queue.with_queue(true, |queue| {
         refresh_queue(queue, state);
-        let card = queue.cards.iter().find(|c| c.id == id).cloned().ok_or_else(|| AppError::msg("卡片已不存在"))?;
+        let card = queue.cards.iter().find(|c| c.id == id).cloned().ok_or_else(|| AppError::machine("CARD_GONE"))?;
         if action == "harness_start" {
             if card.session.is_some() || card.harness.is_some() {
-                return Err(AppError::msg("请选择空白卡片"));
+                return Err(AppError::machine("HARNESS_START_NOT_BLANK"));
             }
         } else {
-            let harness = card.harness.as_ref().ok_or_else(|| AppError::msg("请先退出当前 CLI"))?;
+            let harness = card.harness.as_ref().ok_or_else(|| AppError::machine("HARNESS_STILL_RUNNING"))?;
             let dead = state.terminals.snapshot(&harness.terminal_id).is_none_or(|t| t.exited);
             if !["error", "exited"].contains(&harness.state.as_str()) && !dead {
-                return Err(AppError::msg("请先退出当前 CLI"));
+                return Err(AppError::machine("HARNESS_STILL_RUNNING"));
             }
             if action == "harness_reopen" && harness.provider_session_id.is_some() {
-                return Err(AppError::msg("已识别原会话，请使用继续会话"));
+                return Err(AppError::machine("HARNESS_ALREADY_KNOWN"));
             }
         }
-        let workspace = queue.workspaces.as_ref().and_then(|ws| ws.iter().find(|w| Some(&w.id) == card.workspace_id.as_ref())).cloned().ok_or_else(|| AppError::msg("工作区不存在"))?;
+        let workspace = queue.workspaces.as_ref().and_then(|ws| ws.iter().find(|w| Some(&w.id) == card.workspace_id.as_ref())).cloned().ok_or_else(|| AppError::machine("WORKSPACE_MISSING"))?;
         Ok((card, workspace))
     }).await?;
     let kind = if action == "harness_start" {
@@ -245,7 +245,7 @@ async fn launch_harness(state: &AppState, body: &Value, action: &str) -> AppResu
             _ => true,
         };
         if changed {
-            return Err(AppError::msg("启动期间卡片或工作区已变更，请重试"));
+            return Err(AppError::machine("HARNESS_STATE_CHANGED"));
         }
         let card = card.unwrap();
         card.harness = Some(launched.clone());
@@ -317,12 +317,12 @@ fn apply_action(queue: &mut CardQueue, body: &Value, action: &str, state: &AppSt
         }
         "workspace_weight" => {
             let workspace_id = body.get("workspaceId").and_then(|v| v.as_str()).unwrap_or_default();
-            let workspace = queue.workspaces.as_mut().and_then(|ws| ws.iter_mut().find(|w| w.id == workspace_id)).ok_or_else(|| AppError::msg("工作区不存在"))?;
+            let workspace = queue.workspaces.as_mut().and_then(|ws| ws.iter_mut().find(|w| w.id == workspace_id)).ok_or_else(|| AppError::machine("WORKSPACE_MISSING"))?;
             workspace.default_conversation_weight = Some(numeric_weight(body.get("weight").unwrap_or(&json!(0))));
         }
         "workspace_update" => {
             let workspace_id = body.get("workspaceId").and_then(|v| v.as_str()).unwrap_or_default();
-            let workspace = queue.workspaces.as_mut().and_then(|ws| ws.iter_mut().find(|w| w.id == workspace_id)).ok_or_else(|| AppError::msg("工作区不存在"))?;
+            let workspace = queue.workspaces.as_mut().and_then(|ws| ws.iter_mut().find(|w| w.id == workspace_id)).ok_or_else(|| AppError::machine("WORKSPACE_MISSING"))?;
             let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("").trim();
             if name.is_empty() { return Err(AppError::msg("请输入工作区名称")); }
             workspace.name = name.into();
@@ -425,7 +425,7 @@ fn apply_action(queue: &mut CardQueue, body: &Value, action: &str, state: &AppSt
             }
         }
         "remind_back" => {
-            let card = queue.cards.iter().find(|c| Some(c.id.as_str()) == id).ok_or_else(|| AppError::msg("卡片已不存在"))?;
+            let card = queue.cards.iter().find(|c| Some(c.id.as_str()) == id).ok_or_else(|| AppError::machine("CARD_GONE"))?;
             if matches!(card.phase, crate::models::CardPhase::Working) { return Err(AppError::msg("卡片正在工作中")); }
             if !release_remind(queue, id.unwrap_or_default()) {
                 return Err(AppError::msg("该卡片不在稍后提醒中"));
@@ -446,7 +446,7 @@ fn apply_action(queue: &mut CardQueue, body: &Value, action: &str, state: &AppSt
             }
         }
         "restore" => {
-            let card = queue.cards.iter_mut().find(|c| Some(c.id.as_str()) == id).ok_or_else(|| AppError::msg("卡片已不存在"))?;
+            let card = queue.cards.iter_mut().find(|c| Some(c.id.as_str()) == id).ok_or_else(|| AppError::machine("CARD_GONE"))?;
             crate::debuglog::info_card("queue", &card.id, None, "restore");
             card.archived_at = None;
             move_card(queue, id.unwrap_or_default(), "front");
@@ -482,7 +482,7 @@ fn apply_action(queue: &mut CardQueue, body: &Value, action: &str, state: &AppSt
             }
         }
         "side_terminal_add" => {
-            let card = queue.cards.iter_mut().find(|c| Some(c.id.as_str()) == id).ok_or_else(|| AppError::msg("卡片已不存在"))?;
+            let card = queue.cards.iter_mut().find(|c| Some(c.id.as_str()) == id).ok_or_else(|| AppError::machine("CARD_GONE"))?;
             let terminal_id = body.get("terminalId").and_then(|v| v.as_str()).unwrap_or_default();
             if !valid_side_terminal_id(terminal_id) { return Err(AppError::msg("无效的终端")); }
             crate::debuglog::bind_term(terminal_id, &card.id);
@@ -510,7 +510,7 @@ fn apply_action(queue: &mut CardQueue, body: &Value, action: &str, state: &AppSt
             state.terminals.kill(terminal_id);
         }
         "side_terminal_open" => {
-            let card = queue.cards.iter_mut().find(|c| Some(c.id.as_str()) == id).ok_or_else(|| AppError::msg("卡片已不存在"))?;
+            let card = queue.cards.iter_mut().find(|c| Some(c.id.as_str()) == id).ok_or_else(|| AppError::machine("CARD_GONE"))?;
             let open = body.get("open").and_then(|v| v.as_bool()).unwrap_or(false);
             card.side_terminal_open = open.then_some(true);
         }

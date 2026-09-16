@@ -1,6 +1,70 @@
+//! CodeBuddy: a real harness of its own — its own manifest directory, its own binary,
+//! its own title tiers — that happens to share Claude's plugin layout and transcript
+//! format. It used to ride in on Claude's registry default; it is spelled out here.
+
+use super::claude::{claude_session_details, family_plan, EVENTS};
+use super::registry::{resume_flag, Adapter, Ctx, GlobalCtx, Harness, Plan};
 use super::label_text::{clip, json_text, SessionLabel};
 use super::session_find::{find_first, safe_name_id};
+use super::session_label::SessionFacts;
+use crate::error::AppResult;
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
+
+pub struct CodeBuddy;
+
+pub static CODEBUDDY: CodeBuddy = CodeBuddy;
+
+impl Harness for CodeBuddy {
+    fn id(&self) -> &'static str {
+        "codebuddy"
+    }
+    fn adapter(&self) -> Option<Adapter> {
+        Some(Adapter::new("codebuddy", &[], resume_flag))
+    }
+
+    fn events(&self) -> &'static [&'static str] {
+        EVENTS
+    }
+
+    fn plan<'a>(&'a self, ctx: Ctx<'a>) -> Pin<Box<dyn Future<Output = AppResult<Plan>> + Send + 'a>> {
+        Box::pin(family_plan(ctx, self.events()))
+    }
+
+    /// External CodeBuddy sessions read the Claude layout through their own manifest,
+    /// so their ingress copy lives under the codebuddy plugin directory; the settings
+    /// merge itself is Claude's.
+    fn global(&self, ctx: &GlobalCtx) {
+        let _ = ctx.install_ingress("codebuddy");
+    }
+
+    fn external_ingress(&self) -> bool {
+        true
+    }
+
+    // —— the session store ——
+
+    fn session_exists(&self, id: &str) -> Option<bool> {
+        Some(session_exists(id))
+    }
+    fn session_label(&self, id: &str, _need_first_prompt: bool) -> Option<SessionLabel> {
+        Some(session_label(id))
+    }
+    /// CodeBuddy keeps Claude's transcript format, so the conversation reads from the
+    /// one store even though the title tiers are its own.
+    fn session_details(&self, id: &str) -> Option<SessionFacts> {
+        claude_session_details(id).map(|details| SessionFacts {
+            name: details.title,
+            cwd: details.cwd,
+            prompt: details.prompt,
+            reply: details.reply,
+            turns: details.turns,
+        })
+    }
+}
+
+// —— the session store ——
 
 fn codebuddy_home() -> PathBuf {
     if let Ok(path) = std::env::var("CODEBUDDY_CONFIG_DIR") {
@@ -17,14 +81,14 @@ fn transcript_path(session_id: &str) -> Option<PathBuf> {
     find_first(&[codebuddy_home().join("projects")], &format!("{session_id}.jsonl"))
 }
 
-pub fn session_exists(session_id: &str) -> bool {
+fn session_exists(session_id: &str) -> bool {
     if !safe_name_id(session_id) {
         return false;
     }
     transcript_path(session_id).is_some()
 }
 
-pub fn session_label(session_id: &str) -> SessionLabel {
+fn session_label(session_id: &str) -> SessionLabel {
     if !safe_name_id(session_id) {
         return SessionLabel::default();
     }

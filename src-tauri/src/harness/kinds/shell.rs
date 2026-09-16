@@ -1,6 +1,9 @@
+//! The shell card: no CLI and no hooks — its state comes off the PTY, from the shell
+//! integration scripts' OSC 133 marks.
+
+use super::registry::Harness;
 use crate::error::AppResult;
-use crate::models::QueueWorkspace;
-use crate::paths::signal_dir;
+use crate::models::QueueWorkspace;use crate::paths::signal_dir;
 use crate::ssh::{shell_quote, ssh_exec};
 use crate::terminal::Spawn;
 use std::collections::HashMap;
@@ -25,7 +28,7 @@ pub async fn prepare_shell(workspace: &QueueWorkspace, directory: &Path, bin_dir
     let mut user_home = dirs::home_dir().unwrap_or_else(|| Path::new(".").to_path_buf());
     let mut original_zdotdir = std::env::var("ZDOTDIR").map(std::path::PathBuf::from).unwrap_or_else(|_| user_home.clone());
     if remote {
-        let host = workspace.ssh_host.as_deref().ok_or_else(|| crate::error::AppError::msg("工作区不存在"))?;
+        let host = workspace.ssh_host.as_deref().ok_or_else(|| crate::error::AppError::machine("WORKSPACE_MISSING"))?;
         let facts = String::from_utf8_lossy(&ssh_exec(host, r#"printf "%s\n%s\n%s" "$HOME" "${SHELL:-/bin/bash}" "${ZDOTDIR:-$HOME}""#).await?).to_string();
         let mut lines = facts.lines();
         if let Some(home) = lines.next() { user_home = Path::new(home).to_path_buf(); }
@@ -94,6 +97,7 @@ pub async fn prepare_shell(workspace: &QueueWorkspace, directory: &Path, bin_dir
     Ok(ShellLaunch { spawn: Spawn::Local { executable: shell, args, env }, version: String::new(), command_notifications })
 }
 
+/// The OSC 133 marks the integration scripts write around each command.
 pub fn probe_chunk(data: &str) -> Option<(bool, Option<i32>)> {
     if data.contains("\x1b]133;C") { return Some((true, None)); }
     if let Some(index) = data.find("\x1b]133;D") {
@@ -107,4 +111,25 @@ pub fn probe_chunk(data: &str) -> Option<(bool, Option<i32>)> {
 fn utf16_le_base64(value: &str) -> String {
     let bytes: Vec<u8> = value.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
     base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes)
+}
+
+pub struct Shell;
+
+pub static SHELL: Shell = Shell;
+
+impl Harness for Shell {
+    fn id(&self) -> &'static str {
+        "shell"
+    }
+    // `adapter()` stays `None`: a shell card runs no CLI at all, so the launch
+    // pipeline falls back to `prepare_shell`, and there is no session of its own to
+    // resume.
+
+    fn notify_probe(&self) -> bool {
+        false
+    }
+
+    fn refresh_probe_label(&self) -> bool {
+        false
+    }
 }

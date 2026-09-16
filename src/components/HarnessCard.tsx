@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createShellProbe } from "@/lib/harness/shell-probe";
-import { harnessPicker, harnessName, providerIconId } from "@/lib/harness/catalog";
+import { harnessPicker, harnessName, providerIconId, isPiMark, terminalOptions } from "@/lib/harness/catalog";
+import { harnessErrorText } from "@/lib/harness/errors";
 import { createPortal } from "react-dom";
 import { useI18n } from "@/hooks/useI18n";
 import { ProviderIcon } from "./ProviderIcon";
@@ -27,7 +28,7 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
   const [mode] = useState<"cli">("cli");
   const [busy, setBusy] = useState(false);
   const [startingKind, setStartingKind] = useState<string | null>(null);
-  const [actionError, setActionError] = useState("");
+  const [actionError, setActionError] = useState<unknown>(null);
   const auth = useSshAuthChallenge();
   const [pendingAction, setPendingAction] = useState<{ action: string; data: Record<string, unknown> } | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
@@ -98,14 +99,14 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
 
   const act = async (action: string, data: Record<string, unknown> = {}) => {
     setBusy(true);
-    setActionError("");
+    setActionError(null);
     try { await onAction(action, { id: card.id, ...data }); }
     catch (error) {
       // The SSH layer is asking for a secret, not failing: put up the auth
       // dialog, remember what the user was trying to do, and replay it once
       // the connection is in. Everything else stays a plain message.
       if (sshHost && needsSshSecret(error)) { setPendingAction({ action, data }); setAuthError(null); auth.present(error); }
-      else setActionError(error instanceof Error ? error.message : String(error));
+      else setActionError(error);
     }
     finally { setBusy(false); }
   };
@@ -135,20 +136,20 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
   </div>;
   const logsButton = fresh || !harness ? null : <button type="button" className="cq-tools-trigger" disabled={busy || logBusy} onClick={() => void (async () => {
     setLogBusy(true);
-    setActionError("");
+    setActionError(null);
     try { await saveAndOpenCardLog(card.id, harness.terminalId); }
-    catch (error) { setActionError(error instanceof Error ? error.message : t("harness.logsFailed")); }
+    catch (error) { setActionError(error instanceof Error ? error : t("harness.logsFailed")); }
     finally { setLogBusy(false); }
   })()} aria-label={t("harness.logsHint")} title={t("harness.logsHint")}>
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" /></svg>
     <span>{logBusy ? t("harness.logsSaving") : t("harness.logs")}</span>
   </button>;
-  const terminal = harness ? <TerminalPanel key={`${harness.terminalId}:${connection}`} cardId={card.id} embedded remote={harness.remote} themeProfile={harness.kind === "grok" ? "grok" : undefined} conptyCursorHide={harness.kind !== "codex"} readOnly={card.archivedAt !== undefined || harness.state === "exited" || harness.state === "error"} tab={{ id: harness.terminalId, cwd: card.cwd, restored: true }} active={active} focusReporting={harness.kind !== "shell"} inQueue={inQueue}
+  const terminal = harness ? <TerminalPanel key={`${harness.terminalId}:${connection}`} cardId={card.id} embedded remote={harness.remote} {...terminalOptions(harness.kind)} readOnly={card.archivedAt !== undefined || harness.state === "exited" || harness.state === "error"} tab={{ id: harness.terminalId, cwd: card.cwd, restored: true }} active={active} inQueue={inQueue}
     harnessKind={harness.kind} harnessName={harnessName(harness.kind)} isStarting={harness.state === "starting" || connection > 0}
     onOutput={harness.kind === "shell" && harness.shellCommandNotifications !== false ? data => shellProbe.current?.(data) : undefined} onStatusChange={setTerminalStatus} onRestart={() => void act(harness.providerSessionId ? "harness_resume" : "harness_reopen")} onClosed={() => {}} onCloseError={() => {}} /> : null;
 
   return <>
-    {actionError && <ErrorDialog message={actionError} onDismiss={() => setActionError("")} />}
+    {actionError ? <ErrorDialog message={harnessErrorText(actionError, t)} onDismiss={() => setActionError(null)} /> : null}
     {sshHost && <SshAuthChallenge challenge={auth.challenge} hostName={sshHostName || sshHost} busy={authBusy} error={authError} onCancel={() => { auth.clear(); setPendingAction(null); setAuthError(null); }} onRetry={(password, trustedPrompt) => void retryWithSecret(password, trustedPrompt)} />}
     {fresh ? active && switchPosition && createPortal(<div className="cq-harness-floating" style={switchPosition}>{controls}</div>, document.body) : <>
       {target && controls && createPortal(controls, target)}
@@ -164,7 +165,7 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
           </span>
           <h3>{ended ? t("harness.processNotStarted", { name: harnessName(harness.kind) }) : terminalStatus === "connecting" ? t("harness.connecting") : t("harness.disconnected")}</h3>
           {!ended && <p>{t("harness.reconnectHint")}</p>}
-          {actionError && <p role="alert">{actionError}</p>}
+          {actionError ? <p role="alert">{harnessErrorText(actionError, t)}</p> : null}
           <div className="cq-terminal-recovery-actions">
             <button type="button" className="cq-terminal-recovery-primary" disabled={busy} onClick={() => {
               if (ended) void act(harness.providerSessionId ? "harness_resume" : "harness_reopen");
@@ -172,9 +173,9 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
             }}>{busy ? t("harness.opening") : ended ? harness.providerSessionId ? t("harness.resume") : t("harness.startProcess") : t("harness.reconnect")}</button>
             {ended && onStartAll && <button type="button" className="cq-terminal-recovery-all" disabled={busy} onClick={() => void (async () => {
               setBusy(true);
-              setActionError("");
+              setActionError(null);
               try { await onStartAll(); }
-              catch (error) { setActionError(error instanceof Error ? error.message : String(error)); }
+              catch (error) { setActionError(error); }
               finally { setBusy(false); }
             })()}>{t("harness.startAllProcesses")}</button>}
           </div>
@@ -199,7 +200,7 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
         setStartingKind(item.id);
         void act("harness_start", { kind: item.id }).finally(() => setStartingKind(null));
       }}>
-        <span className="cq-harness-option-icon" aria-hidden="true">{item.id === "shell" ? <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3m6 0h4"/></svg> : item.id === "pi" || item.id === "omp" ? <span className="cq-harness-pi-mark">π</span> : <ProviderIcon id={providerIconId(item.id)} size={28} />}</span>
+        <span className="cq-harness-option-icon" aria-hidden="true">{item.id === "shell" ? <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3m6 0h4"/></svg> : isPiMark(item.id) ? <span className="cq-harness-pi-mark">π</span> : <ProviderIcon id={providerIconId(item.id)} size={28} />}</span>
         <span><strong>{item.name}</strong><small>{busy ? t("harness.checking") : item.id === "shell" ? t("harness.shellDescription") : item.description}</small></span><span className="cq-harness-option-arrow" aria-hidden="true">↗</span>
       </button>)}
       </div>

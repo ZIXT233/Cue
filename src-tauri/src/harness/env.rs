@@ -40,8 +40,8 @@ async fn dump_local_environment() -> AppResult<HashMap<String, String>> {
     }
     .map_err(|e| crate::error::AppError::msg(format!("读取用户 Shell 环境失败：{e}")))?;
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let start = stdout.find(START).ok_or_else(|| crate::error::AppError::msg("未能读取 Shell 环境，请检查 Shell 配置中的启动命令"))?;
-    let end = stdout[start + START.len()..].find(END).ok_or_else(|| crate::error::AppError::msg("未能读取 Shell 环境，请检查 Shell 配置中的启动命令"))?;
+    let start = stdout.find(START).ok_or_else(|| crate::error::AppError::machine("HARNESS_ENV_UNREADABLE"))?;
+    let end = stdout[start + START.len()..].find(END).ok_or_else(|| crate::error::AppError::machine("HARNESS_ENV_UNREADABLE"))?;
     let body = &stdout[start + START.len()..start + START.len() + end];
     let mut env: HashMap<String, String> = std::env::vars().collect();
     if cfg!(windows) {
@@ -61,14 +61,17 @@ async fn dump_local_environment() -> AppResult<HashMap<String, String>> {
     Ok(env)
 }
 
-pub fn resolve_local_command(command: &str, env: &HashMap<String, String>) -> Option<String> {
+pub fn resolve_local_command(command: &str, env: &HashMap<String, String>, extra_dirs: &[PathBuf]) -> Option<String> {
     let read = |key: &str| env.iter().find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v.clone());
     let path = read("PATH").unwrap_or_default();
     let sep = if cfg!(windows) { ';' } else { ':' };
     let mut dirs: Vec<PathBuf> = path.split(sep).filter(|s| Path::new(s).is_absolute()).map(PathBuf::from).collect();
     if let Some(home) = dirs::home_dir() {
         dirs.push(home.join(".local/bin"));
-        dirs.push(home.join(".opencode/bin"));
+        // A harness whose CLI may hide in a directory of its own names it.
+        for dir in extra_dirs {
+            dirs.push(home.join(dir));
+        }
     }
     if cfg!(windows) {
         if let Some(appdata) = read("APPDATA") {

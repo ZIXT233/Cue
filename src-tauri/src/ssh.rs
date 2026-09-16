@@ -42,6 +42,17 @@ pub fn ssh_login_command(command: &str) -> String {
     format!("/bin/sh -c {}", shell_quote(&format!("exec \"${{SHELL:-/bin/sh}}\" -ilc {}", shell_quote(&run))))
 }
 
+/// The one-shot "is this CLI on the host's PATH" probe a remote launch runs before
+/// opening a card.
+///
+/// `command -v` exits non-zero when the name is absent, and a non-zero exit would
+/// surface the login shell's rc noise (ioctl complaints from a pty-less shell) as the
+/// error text. The trailing `true` keeps the probe itself alive, so an empty answer is
+/// the "not installed" verdict and the caller gets to write the message.
+pub fn ssh_cli_probe(executable: &str) -> String {
+    format!("command -v {}; true", shell_quote(executable))
+}
+
 /// An interactive login shell on the remote host, started in `directory`.
 ///
 /// `exec` on an SSH channel runs the command through `$SHELL -c`, which reads no
@@ -75,7 +86,7 @@ pub async fn ssh_login_exec(host: &str, command: &str) -> AppResult<Vec<u8>> {
     let marker = format!("__CUE_LOGIN_{}__", uuid::Uuid::new_v4());
     let wrapped = ssh_login_command(&format!("printf '%s' {}; {}", shell_quote(&marker), command));
     let output = ssh_exec(host, &wrapped).await?;
-    let start = output.windows(marker.len()).position(|w| w == marker.as_bytes()).ok_or_else(|| AppError::msg("远程 Shell 未执行检测命令，请检查 Shell 启动配置"))?;
+    let start = output.windows(marker.len()).position(|w| w == marker.as_bytes()).ok_or_else(|| AppError::machine("REMOTE_SHELL_NO_OUTPUT"))?;
     Ok(output[start + marker.len()..].to_vec())
 }
 
@@ -108,5 +119,13 @@ mod tests {
         assert!(command.contains(r#"-ilc"#), "{command}");
         assert!(command.contains(r#"'codex --version'"#), "{command}");
         assert!(!remote_login_shell("/srv/app", false).contains("-c "));
+    }
+
+    /// The probe must always exit zero — a non-zero exit would carry the shell's rc
+    /// noise back as the error text — and the CLI name must stay one shell word.
+    #[test]
+    fn a_cli_probe_always_succeeds_and_keeps_the_name_quoted() {
+        assert_eq!(ssh_cli_probe("codex"), "command -v 'codex'; true");
+        assert_eq!(ssh_cli_probe("my agent"), "command -v 'my agent'; true");
     }
 }

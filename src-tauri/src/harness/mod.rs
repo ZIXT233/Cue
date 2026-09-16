@@ -1,14 +1,6 @@
-mod adapters;
-pub(crate) mod antigravity_session;
-mod codex;
-pub(crate) mod codex_session;
-pub(crate) mod codebuddy_session;
-pub(crate) mod cursor_session;
-pub(crate) mod claude_session;
+pub(crate) mod registry;
+pub(crate) mod kinds;
 mod debug;
-pub(crate) mod pi_session;
-pub(crate) mod omp_session;
-mod grok_session;
 mod label_text;
 mod session_find;
 mod session_label;
@@ -19,23 +11,21 @@ mod inherited;
 mod install;
 mod notify_osc;
 mod osc;
-mod shell;
 mod signals;
 mod windows;
 
 use crate::winproc::NoWindow;
 
-pub use adapters::adapter;
 pub use debug::HarnessDebugSnapshot;
 pub use session_label::session_exists;
 pub use env::local_environment;
 pub use external::ExternalRuntime;
 pub use hooks::{deploy_external_hooks, prepare_hook_launch, sync_installed_hooks};
 pub use osc::HookOscProbe;
-pub use shell::prepare_shell;
 pub use signals::{observe_hook, observe_title, settle_held, HookSignal, ProbeState};
 pub use windows::windows_command;
 
+use kinds::shell::prepare_shell;
 use crate::error::{AppError, AppResult};
 use crate::live::LiveBus;
 use crate::models::{HarnessSession, QueueWorkspace};
@@ -45,10 +35,10 @@ use crate::ssh::{ssh_login_command, ssh_login_exec};
 use crate::terminal::{Spawn, TerminalHub};
 use crate::transcript::read_terminal_transcript;
 use notify_osc::{notify_osc_kinds, observe_notify, prefer_kitty_notifications, KittyNotifyProbe};
-use std::panic::{catch_unwind, AssertUnwindSafe};
-use codex_session::{codex_exit_session_id, resolve_codex_session_prefix};
+use registry::{find, LaunchTweaks};
 use session_label::refresh_probe_label;
 use parking_lot::Mutex;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -79,35 +69,38 @@ impl HarnessRuntime {
     }
 
     pub fn snapshot(&self, session: &HarnessSession, terminals: &TerminalHub) -> HarnessSession {
+        let harness = find(&session.kind);
+        // A harness without an adapter is a shell card: its state comes off the PTY.
+        let shell_card = harness.is_some_and(|h| h.adapter().is_none());
         let mut current = self.probes.lock().get(&session.terminal_id).cloned();
         if current.is_some() {
             apply_file_signals(&self.probes, &self.debug, terminals, &session.terminal_id);
             current = self.probes.lock().get(&session.terminal_id).cloned();
         }
         let mut provider_session_id = current.as_ref().and_then(|c| c.session_id.clone()).or_else(|| session.provider_session_id.clone());
-        if session.kind == "codex" {
-            if let Some(prefix) = current.as_ref().and_then(|c| c.session_id_prefix.as_deref()) {
-                let prefix = prefix.to_lowercase();
-                provider_session_id = if session.remote == Some(true) {
-                    provider_session_id.filter(|id| id.to_lowercase().starts_with(&prefix))
-                } else {
-                    resolve_codex_session_prefix(&prefix)
-                };
-            }
+        // A truncated session id in the TUI title only ever comes from a harness whose
+        // title probe reports one; it resolves through that harness's own store.
+        if let Some(prefix) = current.as_ref().and_then(|c| c.session_id_prefix.as_deref()) {
+            let prefix = prefix.to_lowercase();
+            provider_session_id = if session.remote == Some(true) {
+                provider_session_id.filter(|id| id.to_lowercase().starts_with(&prefix))
+            } else {
+                harness.and_then(|h| h.resolve_session_prefix(&prefix))
+            };
         }
         let terminal = terminals.snapshot(&session.terminal_id);
         let dead = terminal.as_ref().is_none_or(|t| t.exited);
         let mut unpersisted_session = None;
         if dead && session.remote != Some(true) {
-            if session.kind == "codex" {
-                let output = terminal.as_ref().map(|t| t.output.clone())
+            // The session id a dead CLI left in its terminal footer: the read is lazy,
+            // so a harness without a footer never pays for it.
+            if let Some(footer_id) = harness.and_then(|h| h.exit_session_id(&|| {
+                terminal.as_ref().map(|t| t.output.clone())
                     .or_else(|| read_terminal_transcript(&session.terminal_id).map(|saved| saved.output))
-                    .unwrap_or_default();
-                if let Some(footer_id) = codex_exit_session_id(&output) {
-                    let persisted = session_exists("codex", &footer_id);
-                    provider_session_id = if persisted == Some(true) { Some(footer_id) } else { None };
-                    unpersisted_session = Some(persisted == Some(false));
-                }
+            })) {
+                let persisted = session_exists(&session.kind, &footer_id);
+                provider_session_id = if persisted == Some(true) { Some(footer_id) } else { None };
+                unpersisted_session = Some(persisted == Some(false));
             }
             if let Some(id) = provider_session_id.as_deref() {
                 if session_exists(&session.kind, id) == Some(false) {
@@ -119,13 +112,13 @@ impl HarnessRuntime {
         let session_name = current.as_ref().and_then(|c| c.session_name.clone()).or_else(|| session.session_name.clone());
         let first_prompt = current.as_ref().and_then(|c| c.first_prompt.clone()).or_else(|| session.first_prompt.clone());
         let submit_prompt = current.as_ref().and_then(|c| c.submit_prompt.clone()).or_else(|| session.submit_prompt.clone());
-        let shell_notify = session.kind == "shell"
+        let shell_notify = shell_card
             && session.shell_notify == Some(true)
             && session.shell_command_started_at == current.as_ref().and_then(|c| c.shell_command_started_at);
         let state = match &terminal {
             None => "error".into(),
             Some(t) if t.exited => "exited".into(),
-            Some(_) if session.kind == "shell" => {
+            Some(_) if shell_card => {
                 if shell_notify && current.as_ref().and_then(|c| c.shell_command_running) == Some(true) {
                     "working".into()
                 } else {
@@ -135,7 +128,7 @@ impl HarnessRuntime {
             Some(_) => current.as_ref().map(|c| c.state.clone()).unwrap_or_else(|| "unknown".into()),
         };
         let mut next = session.clone();
-        if session.kind == "shell" {
+        if shell_card {
             next.shell_command_started_at = current.as_ref().and_then(|c| c.shell_command_started_at);
             next.shell_command_running = current.as_ref().and_then(|c| c.shell_command_running);
             next.shell_exit_code = current.as_ref().and_then(|c| c.shell_exit_code);
@@ -176,11 +169,11 @@ impl HarnessRuntime {
         settings: &SettingsStore,
         bin_dir: &std::path::Path,
     ) -> AppResult<HarnessSession> {
-        let adapter = adapter(kind)?;
+        let harness = find(kind).ok_or_else(|| AppError::machine("HARNESS_UNSUPPORTED"))?;
         let terminal_id = Uuid::new_v4().simple().to_string();
         let signals = signal_dir(&terminal_id);
         if resume.as_ref().is_some_and(|s| s.provider_session_id.is_none()) {
-            return Err(AppError::msg("未捕获到原会话 ID，无法续接。请通过新会话入口创建新卡片。"));
+            return Err(AppError::machine("HARNESS_RESUME_NO_ID"));
         }
         let mut version = String::new();
         let mut env = HashMap::new();
@@ -188,34 +181,57 @@ impl HarnessRuntime {
         // Filled in by whichever branch below applies. Remote sessions hand the
         // whole login line to the SSH channel; local ones still need a pty.
         let spawn;
+        // A harness without an adapter runs no CLI: a shell card whose state comes
+        // off the PTY.
+        let shell_card = harness.adapter().is_none();
 
-        if adapter.id == "shell" {
+        // A remote card execs the CLI on the host; a missing binary only surfaces as
+        // `exec: …: not found` inside the opened card, after launch has succeeded.
+        // Probe once, through the same login shell the card will use, and fail before
+        // anything opens.
+        if !shell_card && workspace.kind == "ssh" {
+            let host = workspace.ssh_host.as_deref().ok_or_else(|| AppError::machine("WORKSPACE_MISSING"))?;
+            let executable = harness.adapter().expect("checked above").executable;
+            let found = String::from_utf8_lossy(&ssh_login_exec(host, &crate::ssh::ssh_cli_probe(executable)).await?)
+                .trim()
+                .to_string();
+            if !found.starts_with('/') {
+                return Err(AppError::machine_detail("HARNESS_CLI_MISSING_REMOTE", executable));
+            }
+        }
+
+        if shell_card {
             let shell = prepare_shell(workspace, &signals, bin_dir, settings.read()?.powershell_enabled).await?;
             spawn = shell.spawn;
             version = shell.version;
             shell_notifications = shell.command_notifications;
         } else {
+            let adapter = harness.adapter().expect("checked above");
             let mut command_path = adapter.executable.to_string();
             let mut command_prefix: Vec<String> = Vec::new();
+            let tweaks: LaunchTweaks = harness.launch_tweaks();
             if workspace.kind == "local" {
                 let mut local = local_environment(false).await.unwrap_or_default();
-                if let Some(resolved) = env::resolve_local_command(&adapter.executable, &local) {
+                let extra_dirs: Vec<std::path::PathBuf> = dirs::home_dir()
+                    .map(|home| harness.extra_search_dirs().iter().map(|dir| home.join(dir)).collect())
+                    .unwrap_or_default();
+                if let Some(resolved) = env::resolve_local_command(&adapter.executable, &local, &extra_dirs) {
                     command_path = resolved;
                     env = local;
                 } else {
                     local = local_environment(true).await.unwrap_or_default();
-                    if let Some(resolved) = env::resolve_local_command(&adapter.executable, &local) {
+                    if let Some(resolved) = env::resolve_local_command(&adapter.executable, &local, &extra_dirs) {
                         command_path = resolved;
                         env = local;
                     } else {
-                        return Err(AppError::msg(format!("找不到 {}：已读取用户 Shell 环境并检查常见安装目录", adapter.executable)));
+                        return Err(AppError::machine_detail("HARNESS_CLI_MISSING", adapter.executable));
                     }
                 }
                 // cursor-agent.cmd wraps cmd → powershell → node; the bootstrap only
                 // picks versions\<latest>\index.js, so launch node on it directly and
                 // skip two interpreter startups. Any mismatch falls back to the shim.
-                if adapter.id == "cursor" {
-                    if let Some(direct) = windows::direct_node_launch(&command_path) {
+                if tweaks.windows_direct_launch {
+                    if let Some(direct) = kinds::cursor::direct_node_launch(&command_path) {
                         command_path = direct.node;
                         command_prefix = vec![direct.script];
                         for (key, value) in direct.env {
@@ -226,26 +242,26 @@ impl HarnessRuntime {
                     }
                 }
             }
-            let version_flag = if adapter.id == "grok" { "version" } else { "--version" };
             // The probe is display-only (the Pi floor gate is the one exception):
             // keep it off the connect path — a shim probe through cmd/PowerShell
             // costs seconds — and publish the answer via the snapshot overlay.
-            if adapter.id == "pi" {
-                version = detect_version(workspace, &command_path, &command_prefix, version_flag, &env).await?;
-                if !pi_version_ok(&version) {
-                    return Err(AppError::msg("Pi CLI 状态集成需要 Pi 0.80.4 或更新版本（agent_settled 事件），请先升级机器上的 Pi"));
+            if let Some(gate) = harness.version_gate() {
+                version = detect_version(workspace, &command_path, &command_prefix, harness.version_flag(), &env).await?;
+                if !gate.allows(&version) {
+                    return Err(AppError::machine_detail("HARNESS_VERSION_TOO_OLD", gate.min));
                 }
             } else {
                 let probe_workspace = workspace.clone();
                 let probe_command = command_path.clone();
                 let probe_prefix = command_prefix.clone();
                 let probe_env = env.clone();
+                let probe_flag = harness.version_flag();
                 let probe_versions = self.versions.clone();
                 let probe_debug = self.debug.clone();
                 let probe_live = self.live.clone();
                 let probe_terminal = terminal_id.clone();
                 tokio::spawn(async move {
-                    match detect_version(&probe_workspace, &probe_command, &probe_prefix, version_flag, &probe_env).await {
+                    match detect_version(&probe_workspace, &probe_command, &probe_prefix, probe_flag, &probe_env).await {
                         Ok(found) => {
                             debug::record(&probe_debug, &probe_terminal, debug::HarnessDebugEvent {
                                 at: now_ms(),
@@ -267,23 +283,23 @@ impl HarnessRuntime {
                     }
                 });
             }
-            let hooks = match prepare_hook_launch(adapter.id, &signals, workspace, &terminal_id, bin_dir).await {
+            let hooks = match prepare_hook_launch(kind, &signals, workspace, &terminal_id, bin_dir).await {
                 Ok(hooks) => {
-                    crate::debuglog::info_term("harness", &terminal_id, &format!("hooks installed kind={}", adapter.id));
+                    crate::debuglog::info_term("harness", &terminal_id, &format!("hooks installed kind={kind}"));
                     hooks
                 }
                 Err(error) => {
-                    crate::debuglog::log_error(&format!("harness hook install kind={}", adapter.id), &error);
+                    crate::debuglog::log_error(&format!("harness hook install kind={kind}"), &error);
                     return Err(error);
                 }
             };
             env.extend(hooks.env);
-            let canvas_dark = adapter.id == "grok"
+            let canvas_dark = tweaks.dark_canvas
                 || (workspace.kind == "local" && cfg!(windows))
                 || crate::terminal_theme::app_dark();
             env.insert("COLORFGBG".into(), crate::terminal_theme::colorfgbg(canvas_dark).into());
             env.insert("COLORTERM".into(), "truecolor".into());
-            if adapter.id == "cursor" {
+            if tweaks.kitty_notifications {
                 prefer_kitty_notifications(&mut env);
             }
             if let Some(session_id) = resume.as_ref().and_then(|s| s.provider_session_id.clone()) {
@@ -296,13 +312,14 @@ impl HarnessRuntime {
             launch_args.extend(adapter.args.iter().map(|s| s.to_string()));
             launch_args.extend(hooks.args);
             if workspace.kind == "ssh" {
-                let host = workspace.ssh_host.as_deref().ok_or_else(|| AppError::msg("工作区不存在"))?;
+                let host = workspace.ssh_host.as_deref().ok_or_else(|| AppError::machine("WORKSPACE_MISSING"))?;
                 let exports = env.iter().map(|(k, v)| format!("{k}={}", crate::ssh::shell_quote(v))).collect::<Vec<_>>().join(" ");
                 let command = std::iter::once(adapter.executable.to_string()).chain(launch_args).map(|s| crate::ssh::shell_quote(&s)).collect::<Vec<_>>().join(" ");
+                let unset = tweaks.ssh_unset.iter().map(|name| format!("unset {name} && ")).collect::<String>();
                 let remote = format!(
                     "cd {} && {}{}CUE_HARNESS_TTY=$(tty) && export CUE_HARNESS_TTY && exec {}",
                     crate::ssh::shell_quote(&workspace.cwd),
-                    if adapter.id == "cursor" { "unset GHOSTTY_RESOURCES_DIR && " } else { "" },
+                    unset,
                     if exports.is_empty() { String::new() } else { format!("export {exports} && ") },
                     command
                 );
@@ -315,7 +332,6 @@ impl HarnessRuntime {
             }
         }
 
-        let kind = adapter.id.to_string();
         crate::debuglog::info_term(
             "harness",
             &terminal_id,
@@ -329,9 +345,9 @@ impl HarnessRuntime {
             ),
         );
         self.probes.lock().insert(terminal_id.clone(), ProbeState {
-            kind: Some(kind.clone()),
+            kind: Some(kind.to_string()),
             remote: workspace.kind == "ssh",
-            state: if kind == "shell" { "attention".into() } else { "starting".into() },
+            state: if shell_card { "attention".into() } else { "starting".into() },
             at: now_ms(),
             session_id: resume.as_ref().and_then(|s| s.provider_session_id.clone()),
             session_name: resume.as_ref().and_then(|s| s.session_name.clone()),
@@ -344,23 +360,27 @@ impl HarnessRuntime {
             ..ProbeState::default()
         });
         let osc = Arc::new(std::sync::Mutex::new(HookOscProbe::new(terminal_id.clone())));
-        let notify = if kind != "shell" {
+        let notify = if harness.notify_probe() {
             Some(Arc::new(std::sync::Mutex::new(KittyNotifyProbe::new())))
         } else {
             None
         };
-        let title_probe = if kind == "codex" {
-            Some(Arc::new(std::sync::Mutex::new(codex::CodexTitleProbe::new())))
+        let title_probe = if harness.title_probe() {
+            Some(Arc::new(std::sync::Mutex::new(kinds::codex::CodexTitleProbe::new())))
         } else {
             None
         };
         let probes = self.probes.clone();
         let debug_log = self.debug.clone();
         let live = self.live.clone();
-        let kind_cb = kind.clone();
         let id_cb = terminal_id.clone();
+        // The per-kind branches the closure used to read off the kind string, decided
+        // once here from the harness definition.
+        let track_notify_kinds = !shell_card;
+        let process_hook_osc = !shell_card;
+        let track_shell_commands = shell_card && shell_notifications;
         let on_output: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(move |data: &str| {
-            if kind_cb != "shell" {
+            if track_notify_kinds {
                 for kind in notify_osc_kinds(data) {
                     let mut map = probes.lock();
                     if let Some(current) = map.get_mut(&id_cb) {
@@ -381,10 +401,10 @@ impl HarnessRuntime {
                     }
                 }
             }
-            let hook_ok = catch_unwind(AssertUnwindSafe(|| {
-                if let Ok(mut osc) = osc.lock() {
-                    if let Some(signal) = osc.push(data) {
-                        if kind_cb != "shell" {
+            if process_hook_osc {
+                let hook_ok = catch_unwind(AssertUnwindSafe(|| {
+                    if let Ok(mut osc) = osc.lock() {
+                        if let Some(signal) = osc.push(data) {
                             let mut map = probes.lock();
                             if let Some(current) = map.get(&id_cb).cloned() {
                                 let mut next = observe_hook(current.clone(), signal.clone());
@@ -407,18 +427,18 @@ impl HarnessRuntime {
                             }
                         }
                     }
+                }));
+                if hook_ok.is_err() {
+                    debug::record(&debug_log, &id_cb, debug::HarnessDebugEvent {
+                        at: now_ms(),
+                        source: "probe".into(),
+                        event: "panic".into(),
+                        state: String::new(),
+                        session_id: None,
+                        prompt: None,
+                        note: Some("hook-osc".into()),
+                    });
                 }
-            }));
-            if hook_ok.is_err() {
-                debug::record(&debug_log, &id_cb, debug::HarnessDebugEvent {
-                    at: now_ms(),
-                    source: "probe".into(),
-                    event: "panic".into(),
-                    state: String::new(),
-                    session_id: None,
-                    prompt: None,
-                    note: Some("hook-osc".into()),
-                });
             }
             if let Some(notify) = &notify {
                 let notify_ok = catch_unwind(AssertUnwindSafe(|| {
@@ -473,7 +493,7 @@ impl HarnessRuntime {
                             } else {
                                 current.clone()
                             };
-                            let title_is_fallback = kind_cb != "codex" || !raised.hook_seen;
+                            let title_is_fallback = !raised.hook_seen;
                             let mut next = observe_title(
                                 raised.clone(),
                                 state.as_deref().unwrap_or(raised.state.as_str()),
@@ -509,8 +529,8 @@ impl HarnessRuntime {
                     }
                 }
             }
-            if kind_cb == "shell" && shell_notifications {
-                if let Some((running, exit_code)) = shell::probe_chunk(data) {
+            if track_shell_commands {
+                if let Some((running, exit_code)) = kinds::shell::probe_chunk(data) {
                     let mut map = probes.lock();
                     if let Some(current) = map.get_mut(&id_cb) {
                         current.shell_command_running = Some(running);
@@ -535,9 +555,9 @@ impl HarnessRuntime {
         // lives outside this pipeline; the frontend owns per-harness theming.
 
         Ok(HarnessSession {
-            kind,
+            kind: kind.to_string(),
             terminal_id,
-            state: if adapter.id == "shell" { "attention".into() } else { "starting".into() },
+            state: if shell_card { "attention".into() } else { "starting".into() },
             version,
             reply_preview: None,
             shell_command_notifications: Some(shell_notifications),
@@ -548,7 +568,7 @@ impl HarnessRuntime {
             exit_code: None,
             provider_session_id: resume.as_ref().and_then(|s| s.provider_session_id.clone()),
             session_name: resume.as_ref().and_then(|s| s.session_name.clone()).or_else(|| {
-                if adapter.id == "shell" { Some(workspace.name.clone()) } else { None }
+                if shell_card { Some(workspace.name.clone()) } else { None }
             }),
             first_prompt: resume.as_ref().and_then(|s| s.first_prompt.clone()),
             submit_prompt: resume.as_ref().and_then(|s| s.submit_prompt.clone()),
@@ -569,7 +589,7 @@ async fn detect_version(
     env: &HashMap<String, String>,
 ) -> AppResult<String> {
     if workspace.kind == "ssh" {
-        let host = workspace.ssh_host.as_deref().ok_or_else(|| AppError::msg("工作区不存在"))?;
+        let host = workspace.ssh_host.as_deref().ok_or_else(|| AppError::machine("WORKSPACE_MISSING"))?;
         let cmd = format!("{} {}", command_path.rsplit(['/', '\\']).next().unwrap_or(command_path), flag);
         let out = ssh_login_exec(host, &cmd).await?;
         return Ok(String::from_utf8_lossy(&out).trim().to_string());
@@ -589,15 +609,6 @@ async fn detect_version(
     command.no_window();
     let output = command.output().await.map_err(|e| AppError::msg(format!("启动检测失败：{e}")))?;
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
-fn pi_version_ok(version: &str) -> bool {
-    let re = regex::Regex::new(r"(?:^|\s)v?(\d+)\.(\d+)\.(\d+)").unwrap();
-    let Some(caps) = re.captures(version) else { return false };
-    let major: u32 = caps[1].parse().unwrap_or(0);
-    let minor: u32 = caps[2].parse().unwrap_or(0);
-    let patch: u32 = caps[3].parse().unwrap_or(0);
-    major > 0 || minor > 80 || (minor == 80 && patch >= 4)
 }
 
 fn now_ms() -> i64 {

@@ -31,6 +31,13 @@ const POLL_MS: u64 = 500;
 const PREVIEW_MAX_CHARS: usize = 16_000;
 const PROMPT_MAX_CHARS: usize = 4_000;
 
+/// The kind a signal without one is filed under. Cursor is the only harness whose
+/// user-level `hooks.json` is global, so its ingress is the one that can fire from a
+/// context that carries no kind — this fallback is the single record of that fact.
+fn signal_kind(signal: &HookSignal) -> String {
+    signal.kind.clone().unwrap_or_else(|| "cursor".into())
+}
+
 struct Tracked {
     notice: ExternalNotice,
     /// Last event from this session whatever its state, so an uninterrupted
@@ -160,7 +167,7 @@ fn apply_with_settings(
     if signal.agent_id.is_some() || now - signal.at > SIGNAL_MAX_AGE_MS {
         return false;
     }
-    let kind = signal.kind.clone().unwrap_or_else(|| "cursor".into());
+    let kind = signal_kind(&signal);
     if let Some(check) = is_enabled {
         if !check(&kind) {
             return false;
@@ -195,7 +202,7 @@ fn apply_with_settings(
     // Reading the session's own files costs disk work, and the notices lock is read on
     // every snapshot, so it is never held across it. Everything that decides whether
     // this ask is still wanted happens below, under one lock, as it did before.
-    let kind = signal.kind.clone().unwrap_or_else(|| "cursor".into());
+    let kind = signal_kind(&signal);
     let facts = session_facts(&kind, signal.session_id.as_deref());
     let mut map = notices.lock();
     // A hand-dismissed notice stays down until this session asks something newer;
@@ -279,7 +286,7 @@ fn set_working(notices: &Mutex<HashMap<String, Tracked>>, key: &str, signal: &Ho
     let mut map = notices.lock();
     let mut notice = map.get(key).map(|tracked| tracked.notice.clone()).unwrap_or_else(|| ExternalNotice {
         id: key.to_string(),
-        kind: signal.kind.clone().unwrap_or_else(|| "cursor".into()),
+        kind: signal_kind(signal),
         session_id: signal.session_id.clone(),
         project: signal.workspace_root.as_deref().and_then(project_name),
         cwd: signal.workspace_root.clone(),

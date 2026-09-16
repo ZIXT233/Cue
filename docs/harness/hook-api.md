@@ -103,7 +103,8 @@ which is exactly why those three events cannot be read as "the user is being ask
 ## 3. From an event to a conclusion
 
 Harnesses name the same boundary differently. A harness's own words are read in exactly
-one place — `meaning_of` in `signals.rs` — and turn straight into what the card does with
+one place — the shared vocabulary in `signals.rs` (`default_meaning`), reached through
+each harness's `meaning` in the registry — and turn straight into what the card does with
 them. There is deliberately no vocabulary of "canonical events" in between: such a layer
 only produced a name that had to be translated again, and it invited filing an event
 under a meaning it does not have.
@@ -251,15 +252,25 @@ Event mapping follows Orca's Codex adapter (MIT), as noted in the mirror's sourc
 
 ## 8. File map
 
+Every harness owns one file, `src-tauri/src/harness/kinds/<kind>.rs`, implementing the
+`Harness` trait declared in `registry.rs`. The registry (`ALL`, `find`) is the single
+dispatch point: launch, hook install, session access, event vocabulary and per-kind
+quirks are all read from it, and the settings-key aliasing (`gemini` → `antigravity`,
+`omp` → `pi`) lives there as `ingress_key`. Adding a harness means adding one file and
+one row in `ALL` (plus a frontend entry in `src/lib/harness/catalog.ts`).
+
 | Concern | File |
 | --- | --- |
-| State machine, hold/settle | `src-tauri/src/harness/signals.rs` |
+| Registry: `Harness` trait, dispatch, aliasing | `src-tauri/src/harness/registry.rs` |
+| One harness (launch, install, store, quirks) | `src-tauri/src/harness/kinds/<kind>.rs` |
+| State machine, shared vocabulary, hold/settle | `src-tauri/src/harness/signals.rs` |
 | OSC frame decoding | `src-tauri/src/harness/osc.rs` |
-| Card indicators (title, notifications) | `src-tauri/src/harness/notify_osc.rs`, `codex.rs` |
+| Card indicators (title, notifications) | `src-tauri/src/harness/notify_osc.rs`, `kinds/codex.rs` |
 | External sessions and notices | `src-tauri/src/harness/external.rs` |
 | Card ingestion, promotion tick | `src-tauri/src/harness/mod.rs` |
-| One harness's adapter (launch, hooks, config) | `src-tauri/src/harness/adapters/<kind>.rs` |
 | Install mechanics (files, SSH, command, env) | `src-tauri/src/harness/install.rs` |
+| Session-access guards and fallbacks | `src-tauri/src/harness/session_label.rs` |
 | Entry points: prepare / realign / external deploy | `src-tauri/src/harness/hooks.rs` |
+| Frontend registry (picker, external toggles, quirks) | `src/lib/harness/catalog.ts` |
 | Ingress | `bin/harness-hook.cjs`, `bin/harness-opencode.mjs`, `bin/harness-pi.mjs` |
 | TypeScript mirror | `src-tauri/protocol-ref/harness/` |

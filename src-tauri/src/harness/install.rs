@@ -2,9 +2,10 @@
 //! machine it is going to, how its hook command is spelled, how its files get there, and
 //! what environment a card needs.
 //!
-//! A harness itself describes only its differences, in `adapters/<kind>.rs`.
+//! A harness itself describes only its differences — through its [`Harness`] impl in
+//! `kinds/<kind>.rs`, which this module consults wherever a per-kind fact is needed.
 
-use super::adapters::{antigravity, cursor, grok, Plan};
+use super::registry::{self, Harness, Plan};
 use crate::error::{AppError, AppResult};
 use crate::models::QueueWorkspace;
 use crate::paths::{atomic_write, plugin_root};
@@ -19,6 +20,8 @@ const PUSH: &str = r#"const fs=require("node:fs"),p=require("node:path"),root=pr
 /// The machine one harness install is going to.
 pub struct Host {
     pub kind: String,
+    /// The harness this install belongs to, resolved once from the registry.
+    pub harness: &'static dyn Harness,
     pub remote: bool,
     /// Only a local Windows host wraps its hook command in PowerShell.
     pub windows: bool,
@@ -39,6 +42,9 @@ impl Host {
     /// Resolve the host this install goes to. `ingress` is the shared hook script's
     /// source, which the remote cache path is derived from.
     pub async fn open(kind: &str, workspace: &QueueWorkspace, token: &str, ingress: &str) -> AppResult<Host> {
+        let Some(harness) = registry::find(kind) else {
+            return Err(AppError::machine("HARNESS_UNSUPPORTED"));
+        };
         let mut root = plugin_root(kind);
         let mut node = which::which("node").map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| "node".into());
         let mut ssh_host = None;
@@ -47,27 +53,27 @@ impl Host {
             let host = workspace.ssh_host.as_deref().ok_or_else(|| AppError::msg("工作区不存在"))?.to_string();
             let remote_home = String::from_utf8_lossy(&ssh_exec(&host, r#"printf "%s" "$HOME""#).await?).trim().to_string();
             if !remote_home.starts_with('/') {
-                return Err(AppError::msg("无法确定远程主机的 Home 目录"));
+                return Err(AppError::machine("REMOTE_HOME_UNKNOWN"));
             }
             let digest = hex::encode(&Sha256::digest(ingress.as_bytes())[..8]);
-            root = PathBuf::from(match kind {
-                "grok" => format!("{remote_home}/.cache/cue/harness-plugins/grok"),
-                "codex" => format!("{remote_home}/.cache/cue/harness-plugins/codex/{digest}"),
-                "cursor" => format!("{remote_home}/.cache/cue/harness-plugins/cursor"),
-                _ => format!("{remote_home}/.cache/cue/harness/{token}"),
-            });
-            node = String::from_utf8_lossy(&ssh_login_exec(&host, "command -v node").await?).trim().to_string();
+            root = PathBuf::from(harness.remote_root(&remote_home, token, &digest));
+            // `command -v node` exits non-zero when node is absent, and a non-zero exit
+            // would surface the login shell's rc noise (ioctl complaints from a
+            // pty-less shell) as the error text. The `true` keeps the probe alive, so
+            // an empty answer reaches the friendly check below.
+            node = String::from_utf8_lossy(&ssh_login_exec(&host, "command -v node; true").await?).trim().to_string();
             if !node.starts_with('/') {
-                return Err(AppError::msg("远程 Harness 状态探针需要 Node.js，请先在主机安装 Node.js"));
+                return Err(AppError::machine("HARNESS_NODE_MISSING"));
             }
             ssh_host = Some(host);
             home = Some(remote_home);
         }
         let hook_path = if workspace.kind == "ssh" { format!("{}/hook.cjs", root.display()) } else { root.join("hook.cjs").to_string_lossy().into_owned() };
         let windows = workspace.kind == "local" && cfg!(windows);
-        let timeout = if windows { if kind == "cursor" { 15 } else { 5 } } else { 2 };
+        let timeout = harness.hook_timeout(windows);
         Ok(Host {
             kind: kind.into(),
+            harness,
             remote: workspace.kind == "ssh",
             windows,
             root,
@@ -80,11 +86,11 @@ impl Host {
         })
     }
 
-    fn host_name(&self) -> AppResult<&str> {
-        self.ssh_host.as_deref().ok_or_else(|| AppError::msg("工作区不存在"))
+    pub(super) fn host_name(&self) -> AppResult<&str> {
+        self.ssh_host.as_deref().ok_or_else(|| AppError::machine("WORKSPACE_MISSING"))
     }
 
-    fn quote(&self, value: &str) -> String {
+    pub(super) fn quote(&self, value: &str) -> String {
         if self.windows {
             format!("\"{}\"", value.replace('"', "\\\""))
         } else {
@@ -92,16 +98,25 @@ impl Host {
         }
     }
 
-    /// `node <hook> <event>`, spelled for this host's shell.
+    /// `node <hook> <event>`, spelled for this host's shell — the harness's own
+    /// invocation, with no per-kind spelling of its own.
     pub fn command(&self, event: Option<&str>) -> String {
-        if self.windows && self.kind == "cursor" {
-            return [self.node.as_str(), self.hook_path.as_str()].into_iter().chain(event).map(|value| self.quote(value)).collect::<Vec<_>>().join(" ");
-        }
+        self.harness.hook_command(self, event)
+    }
+
+    /// The generic invocation every harness without a spelling of its own uses.
+    pub fn generic_hook_command(&self, event: Option<&str>) -> String {
+        self.generic_hook_command_with_prefix(event, "")
+    }
+
+    /// The generic invocation, with a kind baked into the command line so foreign
+    /// sessions still answer the reply the CLI waits for. The prefix is a unix shell
+    /// env-prefix; the Windows PowerShell wrapper has no such spelling, and no harness
+    /// that needs a prefix invokes hooks through it.
+    pub fn generic_hook_command_with_prefix(&self, event: Option<&str>, prefix: &str) -> String {
         if self.windows {
-            return super::windows::windows_hook_command(&self.node, &self.hook_path, event, &[]);
+            return super::windows::windows_hook_command(&self.node, &self.hook_path, event);
         }
-        // Bake kind so foreign IDE sessions still return the required JSON reply.
-        let prefix = if self.kind == "cursor" { "CUE_HARNESS_KIND=cursor " } else { "" };
         format!(
             "{prefix}{}{}",
             [self.node.as_str(), self.hook_path.as_str()].into_iter().map(|value| self.quote(value)).collect::<Vec<_>>().join(" "),
@@ -125,14 +140,13 @@ impl Host {
             let host = self.host_name()?;
             let payload = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, serde_json::to_string(&plan.files)?);
             ssh_exec(host, &[shell_quote(&self.node), "-e".into(), shell_quote(PUSH), shell_quote(&self.root.to_string_lossy()), shell_quote(&payload)].join(" ")).await?;
-            if let Some(path) = &plan.user_config.grok {
-                ssh_exec(host, &[shell_quote(&self.node), "-e".into(), shell_quote(grok::SSH_COPY), shell_quote(&self.relative("grok-hooks.json")), shell_quote(path)].join(" ")).await?;
-            }
-            if let Some(path) = &plan.user_config.antigravity {
-                ssh_exec(host, &[shell_quote(&self.node), "-e".into(), shell_quote(antigravity::SSH_MERGE), shell_quote(path), shell_quote(&self.relative("antigravity-hooks.json"))].join(" ")).await?;
-            }
-            if let Some(path) = &plan.user_config.cursor {
-                ssh_exec(host, &[shell_quote(&self.node), "-e".into(), shell_quote(cursor::SSH_MERGE), shell_quote(path), shell_quote(&self.relative("cursor-user-hooks.json")), shell_quote(&self.hook_path)].join(" ")).await?;
+            for merge in &plan.user_config {
+                if let Some((script, args)) = &merge.remote {
+                    let payload = self.relative(merge.payload);
+                    let mut argv = vec![shell_quote(&self.node), "-e".to_string(), shell_quote(script)];
+                    argv.extend(args(self, &merge.path, &payload).into_iter().map(|value| shell_quote(&value)));
+                    ssh_exec(host, &argv.join(" ")).await?;
+                }
             }
             return Ok(());
         }
@@ -141,30 +155,12 @@ impl Host {
             if let Some(parent) = path.parent() { std::fs::create_dir_all(parent)?; }
             atomic_write(&path, body)?;
         }
-        if let Some(path) = &plan.user_config.grok {
-            grok::owned(Path::new(path))?;
-            if let Some(parent) = Path::new(path).parent() { std::fs::create_dir_all(parent)?; }
-            atomic_write(Path::new(path), plan.files.get("grok-hooks.json").map(String::as_str).unwrap_or(""))?;
-        }
-        if let Some(path) = &plan.user_config.antigravity {
-            let mut config = antigravity::guard(Path::new(path), &|event: &str| self.command(Some(event)))?;
-            if let Some(obj) = config.as_object_mut() {
-                obj.insert("cue-session-state".into(), serde_json::from_str(plan.files.get("antigravity-hooks.json").map(String::as_str).unwrap_or("{}"))?);
-            }
-            if let Some(parent) = Path::new(path).parent() { std::fs::create_dir_all(parent)?; }
-            atomic_write(Path::new(path), &serde_json::to_string_pretty(&config)?)?;
-        }
-        if let Some(path) = &plan.user_config.cursor {
-            if let Some(incoming) = plan.files.get("cursor-user-hooks.json") {
-                let existing: serde_json::Value = match std::fs::read_to_string(path) {
-                    Ok(raw) => serde_json::from_str(&raw)?,
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => serde_json::json!({}),
-                    Err(error) => return Err(error.into()),
-                };
-                let merged = cursor::merge_user_hooks(existing, &serde_json::from_str(incoming)?, &self.hook_path)?;
-                if let Some(parent) = Path::new(path).parent() { std::fs::create_dir_all(parent)?; }
-                atomic_write(Path::new(path), &serde_json::to_string_pretty(&merged)?)?;
-            }
+        for merge in &plan.user_config {
+            let existing = std::fs::read_to_string(&merge.path).ok();
+            let payload = plan.files.get(merge.payload).map(String::as_str).unwrap_or_default();
+            let text = (merge.local)(existing.as_deref(), payload, self)?;
+            if let Some(parent) = Path::new(&merge.path).parent() { std::fs::create_dir_all(parent)?; }
+            atomic_write(Path::new(&merge.path), &text)?;
         }
         Ok(())
     }
@@ -177,11 +173,8 @@ impl Host {
         }
         // A remote Cursor reports into this token's cards folder; every other harness
         // owns the signal dir the launcher created for it.
-        env.insert("CUE_HARNESS_SIGNAL_DIR".into(), if self.remote && self.kind == "cursor" {
-            format!("{}/cards/{}", self.root.display(), self.token)
-        } else {
-            directory.to_string_lossy().into_owned()
-        });
+        let signal_dir = if self.remote { self.harness.remote_signal_dir(self) } else { None };
+        env.insert("CUE_HARNESS_SIGNAL_DIR".into(), signal_dir.unwrap_or_else(|| directory.to_string_lossy().into_owned()));
         env.insert("CUE_HARNESS_KIND".into(), self.kind.clone());
         // Fire the hook's internal watchdog before the runner's kill deadline.
         env.insert("CUE_HARNESS_WATCHDOG_MS".into(), ((self.timeout - 2).max(1) * 1000).to_string());

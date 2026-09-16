@@ -285,17 +285,14 @@ fn default_developer_probes() -> bool {
     false
 }
 
+/// Every harness that serves sessions Cue never launched under its own settings key
+/// starts enabled; family members covered by their host's key are not listed.
 fn default_external_ingress() -> std::collections::HashMap<String, bool> {
-    let mut map = std::collections::HashMap::new();
-    map.insert("codex".into(), true);
-    map.insert("cursor".into(), true);
-    map.insert("antigravity".into(), true);
-    map.insert("grok".into(), true);
-    map.insert("claude".into(), true);
-    map.insert("opencode".into(), true);
-    map.insert("codebuddy".into(), true);
-    map.insert("pi".into(), true);
-    map
+    crate::harness::registry::ALL
+        .iter()
+        .filter(|harness| harness.external_ingress())
+        .map(|harness| (harness.id().to_string(), true))
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -310,12 +307,11 @@ pub struct AppSettings {
 
 impl AppSettings {
     pub fn is_external_ingress_enabled(&self, harness: &str) -> bool {
-        // "gemini" is an alias for "antigravity", "omp" is an alias for "pi"
-        let key = match harness {
-            "gemini" => "antigravity",
-            "omp" => "pi",
-            other => other,
-        };
+        // Family members share their host's key: "gemini" toggles with "antigravity",
+        // "omp" with "pi". The registry is the one place that mapping lives.
+        let key = crate::harness::registry::find(harness)
+            .map(|h| h.ingress_key())
+            .unwrap_or(harness);
         self.external_ingress.get(key).copied().unwrap_or(true)
     }
 }

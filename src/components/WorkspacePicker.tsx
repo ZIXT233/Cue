@@ -103,7 +103,7 @@ export function WorkspacePicker({ workspaces, remoteHosts, onSelect, onUpdate, o
 
 export function WorkspaceForm({ defaultCwd, entry, onSave, onClose, onBack, busy, error }: {
   defaultCwd: string; onSave: (value: { name: string; kind: "local" | "ssh"; cwd: string; sshHost?: string; defaultConversationWeight: number }) => void;
-  entry: RemoteHost | "local"; onClose: () => void; onBack: () => void; busy: boolean; error: string;
+  entry: RemoteHost | "local"; onClose: () => void; onBack: () => void; busy: boolean; error: unknown;
 }) {
   const { t, locale } = useI18n();
   const remote = entry === "local" ? null : entry;

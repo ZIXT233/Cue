@@ -82,7 +82,7 @@ Cursor 的 hook 会阻塞等待裁决，所以 ingress 总是应答：`beforeSub
 
 ## 3. 从事件到结论
 
-同一个边界，各家 Harness 叫法不同。Harness 自己的词汇只在一个地方被读取——`signals.rs` 的 `meaning_of`——并直接变成卡片要做的事。中间**刻意不设**"规范事件"这一层词汇：那层只会产出还需要再翻译一次的名字，并且诱使人把某个事件归到它并不具备的含义之下。
+同一个边界，各家 Harness 叫法不同。Harness 自己的词汇只在一个地方被读取——`signals.rs` 的共享词汇表（`default_meaning`），经注册表里各家的 `meaning` 到达——并直接变成卡片要做的事。中间**刻意不设**"规范事件"这一层词汇：那层只会产出还需要再翻译一次的名字，并且诱使人把某个事件归到它并不具备的含义之下。
 
 状态本身只有两个。这套词汇补上的是信号路径还需要知道的其余部分：回合的起止边界，以及"CLI 自己应答的门禁"这种如实的"分不清"。
 
@@ -190,15 +190,24 @@ Rust 侧会把每个接入的信号按终端记录，附带 `source`：`hook` / 
 
 ## 8. 文件地图
 
+每家 Harness 拥有一个文件 `src-tauri/src/harness/kinds/<kind>.rs`，实现 `registry.rs` 声明的
+`Harness` trait。注册表（`ALL`、`find`）是唯一分发点：启动、hook 安装、会话存取、事件词汇与
+各家 quirk 全部从注册表读取，设置键的别名归并（`gemini` → `antigravity`、`omp` → `pi`）也以
+`ingress_key` 的形式住在那里。新增一家 Harness = 新增一个文件 + `ALL` 加一行（前端在
+`src/lib/harness/catalog.ts` 加一项）。
+
 | 关注点 | 文件 |
 | --- | --- |
-| 状态机、挂起/升级 | `src-tauri/src/harness/signals.rs` |
+| 注册表：`Harness` trait、分发、别名 | `src-tauri/src/harness/registry.rs` |
+| 单家 Harness（启动、安装、会话存取、quirk） | `src-tauri/src/harness/kinds/<kind>.rs` |
+| 状态机、共享词汇、挂起/升级 | `src-tauri/src/harness/signals.rs` |
 | OSC 帧解码 | `src-tauri/src/harness/osc.rs` |
-| 卡片指示（标题、通知） | `src-tauri/src/harness/notify_osc.rs`、`codex.rs` |
+| 卡片指示（标题、通知） | `src-tauri/src/harness/notify_osc.rs`、`kinds/codex.rs` |
 | 外部会话与提示 | `src-tauri/src/harness/external.rs` |
 | 卡片接入、升级轮询 | `src-tauri/src/harness/mod.rs` |
-| 单家 Harness 的适配（启动、hook、配置） | `src-tauri/src/harness/adapters/<kind>.rs` |
 | 安装机制（落盘、SSH、命令构造、环境变量） | `src-tauri/src/harness/install.rs` |
+| 会话存取守卫与回退 | `src-tauri/src/harness/session_label.rs` |
 | 入口：prepare / realign / 外部部署 | `src-tauri/src/harness/hooks.rs` |
+| 前端注册表（选择器、外部开关、quirk） | `src/lib/harness/catalog.ts` |
 | Ingress | `bin/harness-hook.cjs`、`bin/harness-opencode.mjs`、`bin/harness-pi.mjs` |
 | TypeScript 镜像 | `src-tauri/protocol-ref/harness/` |

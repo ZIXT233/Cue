@@ -4,6 +4,7 @@ import { persistentStorage } from "../lib/persistent-storage.ts";
 
 import { cardTitle as harnessCardTitle } from "@/lib/harness/card-title";
 import { harnessName } from "@/lib/harness/catalog";
+import { harnessErrorText } from "@/lib/harness/errors";
 import { ScoreChipTooltip } from "./ScoreChipTooltip";
 import { useI18n } from "@/hooks/useI18n";
 
@@ -152,7 +153,7 @@ export function CardQueueShell() {
   const [archiveConfirm, setArchiveConfirm] = useState<QueueCard | null>(null);
   const [skipArchiveConfirmation, setSkipArchiveConfirmation] = useState(false);
   const [skipArchiveChecked, setSkipArchiveChecked] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [deckReset, setDeckReset] = useState(0);
   const deckNavigationRef = useRef<((direction: number) => void) | null>(null);
@@ -631,7 +632,7 @@ export function CardQueueShell() {
   const run = useCallback(async (action: string, data: Record<string, unknown> = {}) => {
     setError("");
     try { return await act(action, data); }
-    catch (error) { setError(error instanceof Error ? error.message : String(error)); return null; }
+    catch (error) { setError(error); return null; }
   }, [act]);
   const startable = startableHarnessCards(cards);
   const startAllHarnesses = useCallback(async () => {
@@ -642,11 +643,11 @@ export function CardQueueShell() {
       try {
         await act(harness.providerSessionId ? "harness_resume" : "harness_reopen", { id: card.id });
       } catch (error) {
-        errors.push(`${titleOf(card)}: ${error instanceof Error ? error.message : String(error)}`);
+        errors.push(`${titleOf(card)}: ${harnessErrorText(error, t)}`);
       }
     }
     if (errors.length) throw new Error(errors.join("\n"));
-  }, [act, cards, titleOf]);
+  }, [act, cards, titleOf, t]);
   const chooseSortMode = useCallback(async (mode: "score" | "fifo") => {
     if (!queue || busy || queue.sortMode === mode) return;
     setBusy(true);
@@ -1049,9 +1050,9 @@ export function CardQueueShell() {
       }} />}
       <main className="cq-main">
         {(error || connectionError) && <ErrorDialog
-          message={[error, connectionError].filter(Boolean).join("\n\n")}
-          onDismiss={() => setError("")}
-          onRetry={() => { setError(""); void refresh(); }}
+          message={[error, connectionError].filter(Boolean).map(entry => harnessErrorText(entry, t)).join("\n\n")}
+          onDismiss={() => setError(null)}
+          onRetry={() => { setError(null); void refresh(); }}
         />}
         {claimError && <ErrorDialog
           message={claimError}
@@ -1059,7 +1060,7 @@ export function CardQueueShell() {
           extraAction={{ label: t("queue.返回主页面"), onClick: () => void returnToQueue() }}
         />}
         <div className="cq-stage" ref={stageRef} style={stageWidth !== null ? { width: stageWidth } : undefined}>
-          {!queue ? <div className="cq-empty"><span className="cq-orbit"><Icon name="stack" size={34} /></span><h2>{error || "Connecting Cue…"}</h2></div> : active && canShowDetached ? <>
+          {!queue ? <div className="cq-empty"><span className="cq-orbit"><Icon name="stack" size={34} /></span><h2>{(error ? harnessErrorText(error, t) : "") || "Connecting Cue…"}</h2></div> : active && canShowDetached ? <>
             {detachedId
               ? <div className="cq-static-card cq-single-mode-card">{renderCard(active)}</div>
               : <>
