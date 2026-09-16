@@ -105,6 +105,30 @@ pub struct HarnessSession {
     pub probe: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalNotice {
+    /// Provider conversation id, or the workspace path when the CLI reports none.
+    /// Stable for the life of one external session, so the card survives reloads.
+    pub id: String,
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    /// Last path segment of the workspace the external session is working in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+    /// Always "attention": the notice exists only while the session wants a human.
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notification: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<String>,
+    /// When the session entered attention; drives ordering and the age label.
+    pub at: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DetachedLease {
@@ -235,7 +259,7 @@ fn default_powershell() -> bool {
 }
 
 fn default_developer_probes() -> bool {
-    true
+    false
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -293,10 +317,12 @@ mod tests {
         let explicit: AppSettings = serde_json::from_str(r#"{"powershell_enabled":false}"#).unwrap();
         assert!(!explicit.powershell_enabled);
         assert_eq!(AppSettings::default().powershell_enabled, cfg!(windows));
-        assert!(missing.developer_probes);
+        assert!(!missing.developer_probes);
         let off: AppSettings = serde_json::from_str(r#"{"developer_probes":false}"#).unwrap();
         assert!(!off.developer_probes);
-        let camel: AppSettings = serde_json::from_str(r#"{"developerProbes":false}"#).unwrap();
-        assert!(!camel.developer_probes);
+        let on: AppSettings = serde_json::from_str(r#"{"developer_probes":true}"#).unwrap();
+        assert!(on.developer_probes);
+        let camel: AppSettings = serde_json::from_str(r#"{"developerProbes":true}"#).unwrap();
+        assert!(camel.developer_probes);
     }
 }

@@ -11,6 +11,8 @@ import { ATTENTION_MODES } from "@/lib/attention-mode";
 import { SUBMISSION_BEHAVIORS } from "@/lib/submission-behavior";
 import { announceQueueToast } from "@/lib/queue-toast";
 import { THEME_OPTIONS } from "@/lib/theme";
+import { TERMINAL_BACKGROUND_OPTIONS } from "@/lib/terminal-background";
+import { useTerminalBackground } from "@/hooks/useTerminalBackground";
 import { ThemeIcon } from "./ThemeIcon";
 import {
   CHAT_CONTENT_FONT_SIZE_DEFAULT,
@@ -21,6 +23,9 @@ import {
 import { setLastSettingsSection, type SettingsSection } from "@/lib/settings-navigation";
 import { RemoteHostsSettings } from "./RemoteHostsSettings";
 import { ConfigButton, ConfigSwitch } from "./SettingsUi";
+import { saveAndOpenAppLog } from "@/lib/card-log";
+import { invoke } from "@tauri-apps/api/core";
+import { setDeveloperProbesEnabled } from "@/lib/developer-probes";
 
 interface Props {
   cwd: string | null;
@@ -55,9 +60,21 @@ function GeneralSettings() {
   const audio = useAudio();
   const [audioBlocked, setAudioBlocked] = useState(false);
   const { preference, setThemePreference } = useTheme();
+  const { background: terminalBackground, setBackground: setTerminalBackground } = useTerminalBackground();
   const { mode: attentionMode, setMode: setAttentionMode } = useAttentionMode();
   const { mode: submissionBehavior, setMode: setSubmissionBehavior } = useSubmissionBehavior();
   const { fontSize, setFontSize } = useChatAppearance();
+  const [debugLogging, setDebugLogging] = useState(false);
+  const [logStatus, setLogStatus] = useState("");
+
+  useEffect(() => {
+    void fetch("/api/tools/settings").then(async (response) => {
+      const data = await response.json() as { debugLogging?: boolean; developerProbes?: boolean };
+      const on = !!(data.debugLogging ?? data.developerProbes);
+      setDebugLogging(on);
+      setDeveloperProbesEnabled(on);
+    }).catch(() => {});
+  }, []);
 
   return (
     <div className="settings-general">
@@ -72,6 +89,22 @@ function GeneralSettings() {
               <label key={option.id} className="settings-theme-option">
                 <input type="radio" name="theme" value={option.id} checked={selected} onChange={() => setThemePreference(option.id)} className="sr-only" />
                 <ThemeIcon preference={option.id} />
+                <span className="settings-theme-option-label">{t(option.label)}</span>
+              </label>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="settings-general-section">
+        <h3 className="settings-general-heading">{t("settings.terminalBackground")}</h3>
+        <p className="settings-general-description">{t("settings.terminalBackgroundDescription")}</p>
+        <div role="radiogroup" aria-label={t("settings.terminalBackground")} className="settings-theme-options">
+          {TERMINAL_BACKGROUND_OPTIONS.map((option) => {
+            const selected = terminalBackground === option.id;
+            return (
+              <label key={option.id} className="settings-theme-option">
+                <input type="radio" name="terminal-background" value={option.id} checked={selected} onChange={() => setTerminalBackground(option.id)} className="sr-only" />
                 <span className="settings-theme-option-label">{t(option.label)}</span>
               </label>
             );
@@ -191,6 +224,43 @@ function GeneralSettings() {
             />
           </div>
         </div>
+      </section>
+
+      <section className="settings-general-section">
+        <h3 className="settings-general-heading">{t("settings.diagnostics")}</h3>
+        <p className="settings-general-description">{t("settings.debugLoggingDescription")}</p>
+        <div className="settings-chat-options">
+          <div className="settings-chat-option settings-chat-switch-option">
+            <span>{t("settings.debugLogging")}</span>
+            <ConfigSwitch
+              checked={debugLogging}
+              label={t("settings.debugLogging")}
+              onChange={(next) => {
+                setDebugLogging(next);
+                setDeveloperProbesEnabled(next);
+                void fetch("/api/tools/settings", {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ debugLogging: next }),
+                }).catch(() => {});
+              }}
+            />
+          </div>
+          <div className="settings-chat-option settings-chat-switch-option">
+            <span>{t("settings.logs")}</span>
+            <div className="settings-chat-option-actions">
+              <ConfigButton variant="ghost" size="small" onClick={() => {
+                setLogStatus("");
+                void saveAndOpenAppLog().catch(() => setLogStatus(t("settings.openLogFailed")));
+              }}>{t("settings.openLog")}</ConfigButton>
+              <ConfigButton variant="ghost" size="small" onClick={() => {
+                setLogStatus("");
+                void invoke("open_devtools").catch(() => setLogStatus(t("settings.openDevtoolsFailed")));
+              }}>{t("settings.openDevtools")}</ConfigButton>
+            </div>
+          </div>
+        </div>
+        {logStatus && <p role="status" className="settings-general-error">{logStatus}</p>}
       </section>
 
       <section className="settings-general-section">

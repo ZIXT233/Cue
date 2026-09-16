@@ -26,10 +26,6 @@ pub struct HarnessDebugEvent {
 pub type DebugLog = Mutex<HashMap<String, Vec<HarnessDebugEvent>>>;
 
 pub fn record(log: &DebugLog, terminal_id: &str, event: HarnessDebugEvent) {
-    if !crate::dev_tools::probes_enabled() {
-        let _ = (log, terminal_id, event);
-        return;
-    }
     let mut map = log.lock();
     let events = map.entry(terminal_id.to_string()).or_default();
     events.push(event);

@@ -1,6 +1,7 @@
 mod adapters;
 mod codex;
 pub(crate) mod codex_session;
+pub(crate) mod codebuddy_session;
 pub(crate) mod cursor_session;
 pub(crate) mod claude_session;
 mod debug;
@@ -11,6 +12,7 @@ mod label_text;
 mod session_find;
 mod session_label;
 mod env;
+mod external;
 mod hooks;
 mod inherited;
 mod notify_osc;
@@ -25,6 +27,7 @@ pub use adapters::adapter;
 pub use debug::HarnessDebugSnapshot;
 pub use session_label::session_exists;
 pub use env::local_environment;
+pub use external::ExternalRuntime;
 pub use hooks::prepare_hook_launch;
 pub use osc::HookOscProbe;
 pub use shell::prepare_shell;
@@ -54,25 +57,29 @@ pub struct HarnessRuntime {
     probes: Arc<Mutex<HashMap<String, ProbeState>>>,
     debug: Arc<debug::DebugLog>,
     live: LiveBus,
+    /// terminal_id -> CLI version reported by the deferred `--version` probe.
+    /// The probe no longer sits on the connect path (a PowerShell-backed shim
+    /// costs seconds), so the snapshot overlays the answer once it lands.
+    versions: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl HarnessRuntime {
-    pub fn new(live: LiveBus) -> Self {
+    pub fn new(live: LiveBus, terminals: TerminalHub) -> Self {
         let probes = Arc::new(Mutex::new(HashMap::new()));
         let debug = Arc::new(Mutex::new(HashMap::new()));
-        start_signal_watch(probes.clone(), debug.clone(), live.clone());
-        Self { probes, debug, live }
+        start_signal_watch(probes.clone(), debug.clone(), terminals, live.clone());
+        Self { probes, debug, live, versions: Arc::new(Mutex::new(HashMap::new())) }
     }
 
     pub fn debug_snapshot(&self, terminal_id: &str, terminals: &TerminalHub) -> HarnessDebugSnapshot {
-        self.drain_signals(terminal_id);
+        apply_file_signals(&self.probes, &self.debug, terminals, terminal_id);
         debug::snapshot(&self.debug, &self.probes, terminals, terminal_id)
     }
 
     pub fn snapshot(&self, session: &HarnessSession, terminals: &TerminalHub) -> HarnessSession {
         let mut current = self.probes.lock().get(&session.terminal_id).cloned();
         if current.is_some() {
-            self.drain_signals(&session.terminal_id);
+            apply_file_signals(&self.probes, &self.debug, terminals, &session.terminal_id);
             current = self.probes.lock().get(&session.terminal_id).cloned();
         }
         let mut provider_session_id = current.as_ref().and_then(|c| c.session_id.clone()).or_else(|| session.provider_session_id.clone());
@@ -133,6 +140,11 @@ impl HarnessRuntime {
             next.shell_notify = Some(shell_notify);
         }
         next.state = state;
+        if let Some(found) = self.versions.lock().get(&session.terminal_id).cloned() {
+            if !found.is_empty() {
+                next.version = found;
+            }
+        }
         next.provider_session_id = provider_session_id.clone();
         next.unpersisted_session = unpersisted_session;
         next.reply_preview = current.as_ref().and_then(|c| c.reply_preview.clone());
@@ -153,22 +165,6 @@ impl HarnessRuntime {
         next
     }
 
-    fn drain_signals(&self, terminal_id: &str) {
-        let directory = signal_dir(terminal_id);
-        let Ok(entries) = std::fs::read_dir(&directory) else { return };
-        let mut files: Vec<_> = entries
-            .filter_map(|entry| entry.ok())
-            .map(|entry| entry.path())
-            .filter(|path| {
-                path.file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| regex::Regex::new(r"^\d+-[a-f0-9-]+\.json$").unwrap().is_match(name))
-            })
-            .collect();
-        files.sort();
-        apply_file_signals(&self.probes, &self.debug, terminal_id);
-    }
-
     pub async fn launch(
         &self,
         kind: &str,
@@ -184,7 +180,7 @@ impl HarnessRuntime {
         if resume.as_ref().is_some_and(|s| s.provider_session_id.is_none()) {
             return Err(AppError::msg("未捕获到原会话 ID，无法续接。请通过新会话入口创建新卡片。"));
         }
-        let version;
+        let mut version = String::new();
         let mut env = HashMap::new();
         let mut shell_notifications = false;
         // Filled in by whichever branch below applies. Remote sessions hand the
@@ -198,7 +194,7 @@ impl HarnessRuntime {
             shell_notifications = shell.command_notifications;
         } else {
             let mut command_path = adapter.executable.to_string();
-            let command_prefix = Vec::new();
+            let mut command_prefix: Vec<String> = Vec::new();
             if workspace.kind == "local" {
                 let mut local = local_environment(false).await.unwrap_or_default();
                 if let Some(resolved) = env::resolve_local_command(&adapter.executable, &local) {
@@ -213,14 +209,78 @@ impl HarnessRuntime {
                         return Err(AppError::msg(format!("找不到 {}：已读取用户 Shell 环境并检查常见安装目录", adapter.executable)));
                     }
                 }
+                // cursor-agent.cmd wraps cmd → powershell → node; the bootstrap only
+                // picks versions\<latest>\index.js, so launch node on it directly and
+                // skip two interpreter startups. Any mismatch falls back to the shim.
+                if adapter.id == "cursor" {
+                    if let Some(direct) = windows::direct_node_launch(&command_path) {
+                        command_path = direct.node;
+                        command_prefix = vec![direct.script];
+                        for (key, value) in direct.env {
+                            if !env.keys().any(|k| k.eq_ignore_ascii_case(&key)) {
+                                env.insert(key, value);
+                            }
+                        }
+                    }
+                }
             }
             let version_flag = if adapter.id == "grok" { "version" } else { "--version" };
-            version = detect_version(workspace, &command_path, &command_prefix, version_flag, &env).await?;
-            if adapter.id == "pi" && !pi_version_ok(&version) {
-                return Err(AppError::msg("Pi CLI 状态集成需要 Pi 0.80.4 或更新版本（agent_settled 事件），请先升级机器上的 Pi"));
+            // The probe is display-only (the Pi floor gate is the one exception):
+            // keep it off the connect path — a shim probe through cmd/PowerShell
+            // costs seconds — and publish the answer via the snapshot overlay.
+            if adapter.id == "pi" {
+                version = detect_version(workspace, &command_path, &command_prefix, version_flag, &env).await?;
+                if !pi_version_ok(&version) {
+                    return Err(AppError::msg("Pi CLI 状态集成需要 Pi 0.80.4 或更新版本（agent_settled 事件），请先升级机器上的 Pi"));
+                }
+            } else {
+                let probe_workspace = workspace.clone();
+                let probe_command = command_path.clone();
+                let probe_prefix = command_prefix.clone();
+                let probe_env = env.clone();
+                let probe_versions = self.versions.clone();
+                let probe_debug = self.debug.clone();
+                let probe_live = self.live.clone();
+                let probe_terminal = terminal_id.clone();
+                tokio::spawn(async move {
+                    match detect_version(&probe_workspace, &probe_command, &probe_prefix, version_flag, &probe_env).await {
+                        Ok(found) => {
+                            debug::record(&probe_debug, &probe_terminal, debug::HarnessDebugEvent {
+                                at: now_ms(),
+                                source: "probe".into(),
+                                event: "version".into(),
+                                state: String::new(),
+                                session_id: None,
+                                prompt: Some(found.clone()),
+                                note: None,
+                            });
+                            if !found.is_empty() {
+                                probe_versions.lock().insert(probe_terminal, found);
+                                probe_live.notify("queue");
+                            }
+                        }
+                        Err(error) => {
+                            crate::debuglog::log_error(&format!("harness version probe term={probe_terminal}"), &error);
+                        }
+                    }
+                });
             }
-            let hooks = prepare_hook_launch(adapter.id, &signals, workspace, &terminal_id, bin_dir).await?;
+            let hooks = match prepare_hook_launch(adapter.id, &signals, workspace, &terminal_id, bin_dir).await {
+                Ok(hooks) => {
+                    crate::debuglog::info_term("harness", &terminal_id, &format!("hooks installed kind={}", adapter.id));
+                    hooks
+                }
+                Err(error) => {
+                    crate::debuglog::log_error(&format!("harness hook install kind={}", adapter.id), &error);
+                    return Err(error);
+                }
+            };
             env.extend(hooks.env);
+            let canvas_dark = adapter.id == "grok"
+                || (workspace.kind == "local" && cfg!(windows))
+                || crate::terminal_theme::app_dark();
+            env.insert("COLORFGBG".into(), crate::terminal_theme::colorfgbg(canvas_dark).into());
+            env.insert("COLORTERM".into(), "truecolor".into());
             if adapter.id == "cursor" {
                 prefer_kitty_notifications(&mut env);
             }
@@ -254,14 +314,18 @@ impl HarnessRuntime {
         }
 
         let kind = adapter.id.to_string();
-        crate::debuglog::log(&format!(
-            "harness: launch adapter={kind} workspace_kind={} spawn={}",
-            workspace.kind,
-            match &spawn {
-                Spawn::Local { executable, .. } => format!("LOCAL executable={executable:?}"),
-                Spawn::Remote { host, .. } => format!("REMOTE host={host:?}"),
-            }
-        ));
+        crate::debuglog::info_term(
+            "harness",
+            &terminal_id,
+            &format!(
+                "launch kind={kind} workspace={} spawn={}",
+                workspace.kind,
+                match &spawn {
+                    Spawn::Local { .. } => "local",
+                    Spawn::Remote { host, .. } => host,
+                }
+            ),
+        );
         self.probes.lock().insert(terminal_id.clone(), ProbeState {
             kind: Some(kind.clone()),
             remote: workspace.kind == "ssh",
@@ -271,6 +335,10 @@ impl HarnessRuntime {
             session_name: resume.as_ref().and_then(|s| s.session_name.clone()),
             first_prompt: resume.as_ref().and_then(|s| s.first_prompt.clone()),
             submit_prompt: resume.as_ref().and_then(|s| s.submit_prompt.clone()),
+            // The spawn clock, so the signal path can report `spawn -> first hook`
+            // without reaching into the PTY probe. Stamped a few ms before the
+            // actual spawn; that error is far below the effect we are chasing.
+            spawned_at_ms: Some(now_ms()),
             ..ProbeState::default()
         });
         let osc = Arc::new(std::sync::Mutex::new(HookOscProbe::new(terminal_id.clone())));
@@ -331,6 +399,7 @@ impl HarnessRuntime {
                                 let changed = next.state != current.state || next.hook_seen != current.hook_seen
                                     || next.session_name != current.session_name || next.first_prompt != current.first_prompt
                                     || next.submit_prompt != current.submit_prompt;
+                                note_state(&id_cb, "osc", &signal.event, &current.state, &next.state);
                                 map.insert(id_cb.clone(), next);
                                 if changed { live.notify("hook"); }
                             }
@@ -366,6 +435,7 @@ impl HarnessRuntime {
                                     note: Some(signal.id),
                                 });
                                 let changed = next.state != current.state || next.reply_preview != current.reply_preview;
+                                note_state(&id_cb, "notify-osc", "Notification", &current.state, &next.state);
                                 map.insert(id_cb.clone(), next);
                                 if changed { live.notify("hook"); }
                             }
@@ -406,7 +476,6 @@ impl HarnessRuntime {
                                 raised.clone(),
                                 state.as_deref().unwrap_or(raised.state.as_str()),
                                 now_ms(),
-                                kind_cb == "codex",
                             );
                             if title_is_fallback {
                                 if probe.session_id.is_some() || probe.session_id_prefix.is_some() {
@@ -425,6 +494,13 @@ impl HarnessRuntime {
                                 note: Some(if needs_input { "osc9-or-action-required".into() } else { "codex-title".into() }),
                             });
                             let changed = next.state != current.state || next.hook_seen != current.hook_seen;
+                            note_state(
+                                &id_cb,
+                                "title",
+                                if needs_input { "PermissionRequest" } else { state.as_deref().unwrap_or("title") },
+                                &current.state,
+                                &next.state,
+                            );
                             map.insert(id_cb.clone(), next);
                             if changed { live.notify("hook"); }
                         }
@@ -453,6 +529,8 @@ impl HarnessRuntime {
             true,
             Some(on_output),
         )?;
+        // Per-harness canvas pinning (e.g. Grok's own dark canvas) intentionally
+        // lives outside this pipeline; the frontend owns per-harness theming.
 
         Ok(HarnessSession {
             kind,
@@ -524,9 +602,23 @@ fn now_ms() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
 }
 
+fn note_state(term: &str, source: &str, event: &str, from: &str, to: &str) {
+    if from != to {
+        crate::debuglog::info_term("harness", term, &format!("{from}->{to} {source}/{event}"));
+    } else {
+        crate::debuglog::debug_term("harness", term, &format!("{source}/{event} state={to}"));
+    }
+}
+
+fn signal_file_re() -> &'static regex::Regex {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| regex::Regex::new(r"^\d+-[a-f0-9-]+\.json$").unwrap())
+}
+
 fn apply_file_signals(
     probes: &Mutex<HashMap<String, ProbeState>>,
     debug_log: &debug::DebugLog,
+    terminals: &TerminalHub,
     terminal_id: &str,
 ) -> bool {
     let directory = signal_dir(terminal_id);
@@ -537,7 +629,7 @@ fn apply_file_signals(
         .filter(|path| {
             path.file_name()
                 .and_then(|name| name.to_str())
-                .is_some_and(|name| regex::Regex::new(r"^\d+-[a-f0-9-]+\.json$").unwrap().is_match(name))
+                .is_some_and(|name| signal_file_re().is_match(name))
         })
         .collect();
     files.sort();
@@ -549,6 +641,34 @@ fn apply_file_signals(
                 if let Some(current) = map.get(terminal_id).cloned() {
                     let mut next = observe_hook(current.clone(), signal.clone());
                     refresh_probe_label(&mut next);
+                    // Second leg of the latency: spawn -> first hook. Stamped from
+                    // the CLI's own `signal.at` (what the hook process wrote) when
+                    // the delta is sane, and from the ingest clock otherwise — a
+                    // stale clock would otherwise fabricate a huge number that
+                    // looks like a real finding. Logged once per terminal; later
+                    // hooks leave the field alone.
+                    if next.first_hook_at_ms.is_none() {
+                        next.first_hook_at_ms = Some(signal.at);
+                        // Mirror the stamp onto the PTY probe so `card_report`
+                        // carries both legs of the latency in one place, and
+                        // replaying the log needs no cross-referencing.
+                        terminals.record_first_hook(terminal_id, signal.at);
+                        if let Some(spawned) = next.spawned_at_ms {
+                            let wired = signal.at - spawned;
+                            let wall = now_ms() - spawned;
+                            let delta = if (0..=600_000).contains(&wired) { wired } else { wall };
+                            crate::debuglog::info_term(
+                                "harness",
+                                terminal_id,
+                                &format!(
+                                    "first hook after {delta}ms ({} event={}{})",
+                                    if (0..=600_000).contains(&wired) { "hook" } else { "ingest" },
+                                    signal.event,
+                                    if (0..=600_000).contains(&wired) { "" } else { " [hook clock implausible]" },
+                                ),
+                            );
+                        }
+                    }
                     debug::record(debug_log, terminal_id, debug::HarnessDebugEvent {
                         at: signal.at,
                         source: "file".into(),
@@ -564,6 +684,7 @@ fn apply_file_signals(
                     {
                         changed = true;
                     }
+                    note_state(terminal_id, "file", &signal.event, &current.state, &next.state);
                     map.insert(terminal_id.to_string(), next);
                 }
             }
@@ -576,6 +697,7 @@ fn apply_file_signals(
 fn start_signal_watch(
     probes: Arc<Mutex<HashMap<String, ProbeState>>>,
     debug_log: Arc<debug::DebugLog>,
+    terminals: TerminalHub,
     live: LiveBus,
 ) {
     std::thread::spawn(move || loop {
@@ -583,7 +705,7 @@ fn start_signal_watch(
         let ids: Vec<String> = probes.lock().keys().cloned().collect();
         let mut changed = false;
         for id in ids {
-            if apply_file_signals(&probes, &debug_log, &id) {
+            if apply_file_signals(&probes, &debug_log, &terminals, &id) {
                 changed = true;
             }
         }
@@ -626,8 +748,8 @@ mod tests {
     #[test]
     fn snapshot_without_live_terminal_is_error() {
         let live = LiveBus::new();
-        let runtime = HarnessRuntime::new(live.clone());
-        let terminals = TerminalHub::new(live);
+        let terminals = TerminalHub::new(live.clone());
+        let runtime = HarnessRuntime::new(live, terminals.clone());
         let next = runtime.snapshot(&session("attention"), &terminals);
         assert_eq!(next.state, "error");
         assert_eq!(next.probe.as_deref(), Some("unconfirmed"));
@@ -636,8 +758,8 @@ mod tests {
     #[test]
     fn snapshot_drops_missing_codex_rollout() {
         let live = LiveBus::new();
-        let runtime = HarnessRuntime::new(live.clone());
-        let terminals = TerminalHub::new(live);
+        let terminals = TerminalHub::new(live.clone());
+        let runtime = HarnessRuntime::new(live, terminals.clone());
         let mut current = session("exited");
         current.provider_session_id = Some("00000000-0000-0000-0000-000000000000".into());
         let next = runtime.snapshot(&current, &terminals);

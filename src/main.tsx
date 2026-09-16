@@ -9,6 +9,7 @@ import { I18nProvider } from "./hooks/useI18n";
 import { openDetachedCardWindow } from "./lib/card-window";
 import type { CueDesktop } from "./lib/desktop";
 import { setDeveloperProbesEnabled } from "./lib/developer-probes";
+import { installFrontendLogBridge } from "./lib/app-log";
 import { installApiInterceptor, setApiBase } from "./lib/http";
 import "./styles/globals.css";
 import "./styles/settings.css";
@@ -57,13 +58,23 @@ async function boot() {
   const base = await invoke<string>("api_base");
   setApiBase(base);
   installApiInterceptor();
+  installFrontendLogBridge();
   window.__CUE_API_BASE__ = base;
   try {
     const response = await fetch("/api/tools/settings");
-    const data = await response.json() as { developerProbes?: boolean };
-    setDeveloperProbesEnabled(!!data.developerProbes);
+    const data = await response.json() as { developerProbes?: boolean; debugLogging?: boolean };
+    setDeveloperProbesEnabled(!!(data.debugLogging ?? data.developerProbes));
   } catch {
     /* Keep the Vite default until settings load. */
+  }
+  try {
+    // Whether local sessions must keep the Campbell canvas (inbox ConPTY
+    // fallback). Resolved before the first terminal renders to avoid a flip.
+    const response = await fetch("/api/terminal-theme");
+    const data = await response.json() as { conptyFallback?: boolean };
+    if (data.conptyFallback) document.documentElement.dataset.conptyFallback = "true";
+  } catch {
+    /* Default to the relaxed (theme-following) canvas. */
   }
 
   ReactDOM.createRoot(document.getElementById("root")!).render(

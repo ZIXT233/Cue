@@ -46,7 +46,7 @@ mod native {
             Vec::new(),
         );
         if let Err(err) = registered {
-            eprintln!("[cue] notification response registration failed: {err:?}");
+            crate::debuglog::warn("notify", &format!("response registration failed: {err:?}"));
         }
         let _ = MANAGER.set(manager);
     }
@@ -115,16 +115,16 @@ pub async fn send_completion_notification(
     card_id: String,
     session_url: String,
 ) -> Result<(), String> {
-    eprintln!("[cue] completion notification requested: {title:?}");
+    crate::debuglog::debug_card("notify", &card_id, None, "requested");
 
     #[cfg(target_os = "macos")]
     match native::send(&title, &body, &card_id, &session_url).await {
         Ok(()) => {
-            eprintln!("[cue] notification sent via user-notify");
+            crate::debuglog::info_card("notify", &card_id, None, "sent native");
             return Ok(());
         }
         Err(err) => {
-            eprintln!("[cue] user-notify send failed, falling back to plugin: {err}");
+            crate::debuglog::warn_card("notify", &card_id, None, &format!("native failed, fallback: {err}"));
         }
     }
 
@@ -141,9 +141,9 @@ pub async fn send_completion_notification(
         .show()
         .map(|_| ())
         .map_err(|e| {
-            eprintln!("[cue] plugin notification failed: {e}");
+            crate::debuglog::warn_card("notify", &card_id, None, &format!("plugin failed: {e}"));
             e.to_string()
         })?;
-    eprintln!("[cue] notification sent via tauri plugin");
+    crate::debuglog::info_card("notify", &card_id, None, "sent plugin");
     Ok(())
 }

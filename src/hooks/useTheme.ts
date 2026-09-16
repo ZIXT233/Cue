@@ -5,6 +5,7 @@ import { persistentStorage } from "../lib/persistent-storage.ts";
 import { useCallback, useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
 import { isDarkTheme, isThemePreference, type ThemePreference, type ResolvedTheme } from "@/lib/theme";
+import { syncResolvedTerminalCanvas } from "@/lib/terminal-background";
 
 export type { ThemePreference, ResolvedTheme } from "@/lib/theme";
 
@@ -48,6 +49,7 @@ function applyDomTheme(theme: ResolvedTheme): void {
   if (typeof document === "undefined") return;
   document.documentElement.dataset.theme = theme;
   document.documentElement.classList.toggle("dark", isDarkTheme(theme));
+  syncResolvedTerminalCanvas(isDarkTheme(theme));
 }
 
 function ensureState(): ThemeState {

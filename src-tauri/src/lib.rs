@@ -1,6 +1,7 @@
 pub mod api;
 pub mod debuglog;
 mod cwd;
+mod conpty;
 mod dev_tools;
 mod error;
 mod harness;
@@ -15,6 +16,7 @@ mod remote;
 mod settings;
 mod ssh;
 mod terminal;
+mod terminal_theme;
 mod transcript;
 mod winproc;
 
@@ -27,6 +29,44 @@ struct ApiPort(Mutex<u16>);
 #[tauri::command]
 fn api_base(port: tauri::State<ApiPort>) -> String {
     format!("http://127.0.0.1:{}", *port.0.lock().unwrap())
+}
+
+#[tauri::command]
+fn open_devtools(window: tauri::WebviewWindow) {
+    window.open_devtools();
+}
+
+/// Reveal the file in Finder/Explorer and open it in the default editor.
+#[tauri::command]
+fn reveal_log(path: String) -> Result<(), String> {
+    let path = std::path::PathBuf::from(path);
+    if !path.exists() {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        if path.extension().is_some() {
+            std::fs::write(&path, "").map_err(|e| e.to_string())?;
+        } else if !path.exists() {
+            return Err("log file not found".into());
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg("-R").arg(&path).status().map_err(|e| e.to_string())?;
+        std::process::Command::new("open").arg(&path).status().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer").arg(format!("/select,{}", path.display())).status().map_err(|e| e.to_string())?;
+        std::process::Command::new("cmd").args(["/C", "start", "", path.to_str().unwrap_or("")]).status().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        std::process::Command::new("xdg-open").arg(&path).status().map_err(|e| e.to_string())?;
+        Ok(())
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -47,11 +87,21 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
-            crate::debuglog::log(&format!(
-                "cue starting; ssh-chain log: {} (CUE_DEBUG=0 silences)",
-                crate::debuglog::log_path().display()
-            ));
+            crate::debuglog::init();
+            crate::debuglog::info(
+                "app",
+                &format!(
+                    "cue {} {} log={} level={}",
+                    env!("CARGO_PKG_VERSION"),
+                    std::env::consts::OS,
+                    crate::debuglog::log_path().display(),
+                    crate::debuglog::min_level().map(|l| l.as_str()).unwrap_or("off")
+                ),
+            );
             let resource_dir = app.path().resource_dir().ok();
+            // Prefer the bundled modern ConPTY over the inbox kernel32 build
+            // (must happen before the first local pty spawn).
+            crate::conpty::preload(resource_dir.as_deref());
             let state = build_state(resource_dir);
             app.manage(state.terminals.clone());
             let port = tauri::async_runtime::block_on(start_server(state)).map_err(|e| e.to_string())?;
@@ -59,7 +109,7 @@ pub fn run() {
             notify::init(&app.handle().clone());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![api_base, notify::send_completion_notification, notify::open_notification_settings])
+        .invoke_handler(tauri::generate_handler![api_base, open_devtools, reveal_log, notify::send_completion_notification, notify::open_notification_settings])
         .build(tauri::generate_context!())
         .expect("error while building Cue")
         .run(|app, event| {

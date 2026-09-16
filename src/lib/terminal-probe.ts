@@ -6,6 +6,12 @@ export interface XtermProbe {
   lastOffset?: number;
   lastReset?: boolean;
   gaps?: number;
+  /**
+   * Bytes the server reported as unrecoverable on replay. Distinct from `gaps`,
+   * which a resync can still repair — a non-zero `dropped` means this card's
+   * scrollback genuinely has a hole in it.
+   */
+  dropped?: number;
   status: string;
   at: number;
 }

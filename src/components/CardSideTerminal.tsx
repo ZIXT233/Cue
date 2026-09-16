@@ -178,6 +178,7 @@ export function CardExtraTerminalPanes({
   activeId,
   active,
   remote,
+  cardId,
   onRestart,
   onUnavailable,
 }: {
@@ -185,6 +186,7 @@ export function CardExtraTerminalPanes({
   activeId: string | null;
   active: boolean;
   remote?: boolean;
+  cardId?: string;
   onRestart: (id: string) => void;
   onUnavailable: (id: string) => void;
 }) {
@@ -192,6 +194,7 @@ export function CardExtraTerminalPanes({
     <div key={tab.id} className="cq-side-terminal-body" hidden={tab.id !== activeId}>
       <TerminalPanel
         embedded
+        cardId={cardId}
         remote={remote}
         tab={tab}
         active={active && tab.id === activeId}
@@ -325,6 +328,7 @@ function useCardSideTerminal({
           tabs={extras.tabs}
           activeId={extras.activeId}
           active={active && open}
+          cardId={cardId}
           remote={!!remoteShell}
           onRestart={extras.restartTab}
           onUnavailable={(id) => extras.dropTab(id)}

@@ -149,14 +149,20 @@ pub async fn prepare_hook_launch(
         }
     } else {
         let cursor = kind == "cursor";
+        // CodeBuddy keeps the Claude plugin layout but resolves its own manifest
+        // directory first (`.codebuddy-plugin`); hooks/hooks.json is read the same way.
+        let manifest_dir = if cursor { ".cursor-plugin" } else if kind == "codebuddy" { ".codebuddy-plugin" } else { ".claude-plugin" };
         files.insert(
-            format!("{}/plugin.json", if cursor { ".cursor-plugin" } else { ".claude-plugin" }),
+            format!("{manifest_dir}/plugin.json"),
             serde_json::json!({ "name": "cue-session-state", "version": "1.0.0", "description": "Report this Cue terminal's lifecycle" }).to_string(),
         );
         let events: &[&str] = if cursor {
             &["sessionStart", "beforeSubmitPrompt", "preToolUse", "postToolUse", "postToolUseFailure", "beforeShellExecution", "beforeMCPExecution", "afterAgentResponse", "stop", "sessionEnd"]
         } else {
-            &["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "PostToolUseFailure", "Stop", "StopFailure"]
+            // Notification is what a blocked prompt actually reaches us through:
+            // permission prompts and ask-style tools never surface as a tool call,
+            // so without it a card waits forever with no signal to react to.
+            &["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "Notification", "PostToolUse", "PostToolUseFailure", "Stop", "StopFailure"]
         };
         let mut hooks = serde_json::Map::new();
         for event in events {
@@ -201,7 +207,9 @@ pub async fn prepare_hook_launch(
         }
         extra_env.insert("CUE_HARNESS_CHANNEL".into(), token.into());
         extra_env.insert("CUE_HARNESS_KIND".into(), kind.into());
-        if crate::dev_tools::probes_enabled() {
+        // Fire the hook's internal watchdog before the runner's kill deadline.
+        extra_env.insert("CUE_HARNESS_WATCHDOG_MS".into(), ((hook_timeout - 2).max(1) * 1000).to_string());
+        if crate::debuglog::verbose() {
             extra_env.insert("CUE_HARNESS_DEBUG".into(), "1".into());
         }
         if kind == "cursor" {
@@ -242,7 +250,9 @@ pub async fn prepare_hook_launch(
     }
     extra_env.insert("CUE_HARNESS_SIGNAL_DIR".into(), directory.to_string_lossy().into_owned());
     extra_env.insert("CUE_HARNESS_KIND".into(), kind.into());
-    if crate::dev_tools::probes_enabled() {
+    // Fire the hook's internal watchdog before the runner's kill deadline.
+    extra_env.insert("CUE_HARNESS_WATCHDOG_MS".into(), ((hook_timeout - 2).max(1) * 1000).to_string());
+    if crate::debuglog::verbose() {
         extra_env.insert("CUE_HARNESS_DEBUG".into(), "1".into());
     }
     let _ = signal_dir(token);

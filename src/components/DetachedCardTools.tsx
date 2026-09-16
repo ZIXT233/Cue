@@ -118,6 +118,7 @@ export function DetachedCardTools({ children, cardId, cwd, remoteShell, saved, s
             tabs={extras.tabs}
             activeId={extras.activeId}
             active
+            cardId={cardId}
             remote={!!remoteShell}
             onRestart={extras.restartTab}
             onUnavailable={(id) => extras.dropTab(id)}

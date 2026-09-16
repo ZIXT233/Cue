@@ -30,6 +30,7 @@ export function hookState(event: HookSignal): HarnessState | undefined {
     return "attention";
   }
   if (signal.event === "PermissionRequest") return "attention";
+  if ((event.kind === "antigravity" || signal.kind === "antigravity") && event.event === "PreToolUse") return "attention";
   const asking = /(^|[/.])(request_user_input|ask_user_question|AskUserQuestion)$/.test(signal.tool ?? event.tool ?? "");
   if (asking && ["PreToolUse", "BeforeTool", "preToolUse"].includes(event.event)) return "attention";
   if (signal.event === "UserPromptSubmit") return "working";

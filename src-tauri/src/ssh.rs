@@ -48,8 +48,12 @@ pub fn ssh_login_command(command: &str) -> String {
 /// rc files and is not interactive; replacing that shell with the user's login
 /// shell is what gives the pty a prompt, job control and the user's PATH. The
 /// channel already owns a pty, so nothing local has to imitate one.
-pub fn remote_login_shell(directory: &str) -> String {
-    format!("cd {} && exec \"${{SHELL:-/bin/sh}}\" -il", shell_quote(directory))
+pub fn remote_login_shell(directory: &str, dark: bool) -> String {
+    format!(
+        "cd {} && export COLORFGBG={} COLORTERM=truecolor && exec \"${{SHELL:-/bin/sh}}\" -il",
+        shell_quote(directory),
+        shell_quote(crate::terminal_theme::colorfgbg(dark)),
+    )
 }
 
 pub async fn ssh_exec(host: &str, command: &str) -> AppResult<Vec<u8>> {
@@ -57,9 +61,9 @@ pub async fn ssh_exec(host: &str, command: &str) -> AppResult<Vec<u8>> {
 }
 
 pub async fn ssh_exec_stdin(host: &str, command: &str, stdin: &[u8]) -> AppResult<Vec<u8>> {
-    crate::debuglog::log(&format!("ssh_exec: host={host} cmd={:?}", crate::debuglog::clip(command, 500)));
+    crate::debuglog::debug("ssh", &format!("exec host={host} cmd={:?}", crate::debuglog::clip(command, 500)));
     let output = crate::remote::exec(host, command, stdin).await?;
-    crate::debuglog::log(&format!("ssh_exec: OK stdout_len={}", output.len()));
+    crate::debuglog::debug("ssh", &format!("exec ok stdout_len={}", output.len()));
     Ok(output)
 }
 
@@ -84,7 +88,7 @@ mod tests {
     /// files, which is the whole reason a bare `exec $SHELL` is not enough.
     #[test]
     fn a_remote_login_shell_starts_in_the_workspace() {
-        assert_eq!(remote_login_shell("/srv/app"), r#"cd '/srv/app' && exec "${SHELL:-/bin/sh}" -il"#);
+        assert_eq!(remote_login_shell("/srv/app", false), r#"cd '/srv/app' && export COLORFGBG='0;15' COLORTERM=truecolor && exec "${SHELL:-/bin/sh}" -il"#);
     }
 
     /// A directory with a space or a quote in it must stay one shell word, or the
@@ -92,8 +96,8 @@ mod tests {
     #[test]
     fn a_remote_directory_stays_one_shell_word() {
         assert_eq!(shell_quote("/srv/my app/it's here"), r#"'/srv/my app/it'"'"'s here'"#);
-        assert_eq!(remote_login_shell("/srv/my app/it's here"), r#"cd '/srv/my app/it'"'"'s here' && exec "${SHELL:-/bin/sh}" -il"#);
-        assert_eq!(remote_login_shell("~/notes"), r#"cd '~/notes' && exec "${SHELL:-/bin/sh}" -il"#);
+        assert_eq!(remote_login_shell("/srv/my app/it's here", false), r#"cd '/srv/my app/it'"'"'s here' && export COLORFGBG='0;15' COLORTERM=truecolor && exec "${SHELL:-/bin/sh}" -il"#);
+        assert_eq!(remote_login_shell("~/notes", false), r#"cd '~/notes' && export COLORFGBG='0;15' COLORTERM=truecolor && exec "${SHELL:-/bin/sh}" -il"#);
     }
 
     /// `ssh_login_command` is the other half of the pair: harness CLI launches need
@@ -103,6 +107,6 @@ mod tests {
         let command = ssh_login_command("codex --version");
         assert!(command.contains(r#"-ilc"#), "{command}");
         assert!(command.contains(r#"'codex --version'"#), "{command}");
-        assert!(!remote_login_shell("/srv/app").contains("-c "));
+        assert!(!remote_login_shell("/srv/app", false).contains("-c "));
     }
 }

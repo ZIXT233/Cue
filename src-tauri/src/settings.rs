@@ -44,4 +44,14 @@ impl SettingsStore {
         atomic_write(&settings_file(), &serde_json::to_string_pretty(&settings)?)?;
         Ok(settings)
     }
+
+    pub async fn set_debug_logging(&self, enabled: bool) -> AppResult<AppSettings> {
+        let _guard = self.lock.lock().await;
+        let mut settings = self.read()?;
+        settings.developer_probes = enabled;
+        atomic_write(&settings_file(), &serde_json::to_string_pretty(&settings)?)?;
+        crate::dev_tools::init_from_settings(enabled);
+        crate::debuglog::info("app", &format!("debug_logging={}", enabled));
+        Ok(settings)
+    }
 }

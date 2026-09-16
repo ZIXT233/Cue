@@ -41,7 +41,10 @@ export function mergeQueueSnapshot(previous: CardQueue | null, next: CardQueue):
   return { ...next, cards: next.cards.map(card => {
     const existing = cards.get(card.id);
     return existing && JSON.stringify(existing) === JSON.stringify(card) ? existing : card;
-  }) };
+  }),
+  // Action responses carry no overlay data, so keep the notices the last poll found
+  // instead of blinking them out until the next refresh.
+  external: next.external ?? previous.external };
 }
 
 /** Move an accepted prompt out of the attention deck before the next server snapshot. */

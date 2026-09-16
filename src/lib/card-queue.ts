@@ -33,7 +33,48 @@ export interface QueueCard {
   detached?: { owner: string; expiresAt: number };
   sideTerminals?: { id: string; cwd: string }[];
   sideTerminalOpen?: boolean;
+  /**
+   * A session Cue never launched (Cursor IDE, another terminal). Composed client-side
+   * from the `external` overlay so it rides the deck like any card — same size, same
+   * slide — while staying out of `queue.json` and out of every scheduler decision.
+   */
+  externalNotice?: ExternalNotice;
 }
+/** An attention call from a session Cue never launched (Cursor IDE, another terminal). */
+export interface ExternalNotice {
+  /** Provider conversation id, or the workspace path when the CLI reports none. */
+  id: string;
+  kind: string;
+  sessionId?: string;
+  /** Last path segment of the workspace the session is working in. */
+  project?: string;
+  /** Notices only exist while the session wants a human. */
+  state: "attention";
+  preview?: string;
+  notification?: string;
+  tool?: string;
+  at: number;
+}
+
+/**
+ * Present an external notice as a card the deck can lay out. It carries no session
+ * and no harness, so every queue action that keys off those stays inert; the id is
+ * namespaced so it can never collide with a real card (or another overlay entry).
+ */
+export function externalQueueCards(notices: ExternalNotice[] | undefined): QueueCard[] {
+  return (notices ?? []).map((notice) => ({
+    id: `external:${notice.id}`,
+    cwd: notice.project ?? "",
+    session: null,
+    phase: "attention" as const,
+    createdAt: notice.at,
+    readyAt: notice.at,
+    // The scheduler never sees these, but sorting must stay stable if it ever does.
+    waitingSince: notice.at,
+    externalNotice: notice,
+  }));
+}
+
 export interface CardQueue {
   version: 1;
   revision: number;
@@ -44,6 +85,8 @@ export interface CardQueue {
   turnTagDefinitions?: import("./turn-priority").TurnTag[];
   insertionPosition?: "top" | "bottom";
   workspaces?: QueueWorkspace[];
+  /** Read-only overlay computed on every snapshot; never persisted with the queue. */
+  external?: ExternalNotice[];
 }
 export const EMPTY_QUEUE: CardQueue = { version: 1, revision: 0, cards: [], order: [], sortMode: "score", turnTagsEnabled: false, insertionPosition: "bottom" };
 

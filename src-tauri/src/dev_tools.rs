@@ -3,9 +3,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 static PROBES: AtomicBool = AtomicBool::new(false);
 
 pub fn init_from_settings(enabled: bool) {
-    PROBES.store(cfg!(debug_assertions) && enabled, Ordering::Relaxed);
+    PROBES.store(enabled, Ordering::Relaxed);
+    crate::debuglog::set_verbose(enabled);
 }
 
 pub fn probes_enabled() -> bool {
-    cfg!(debug_assertions) && PROBES.load(Ordering::Relaxed)
+    PROBES.load(Ordering::Relaxed)
 }

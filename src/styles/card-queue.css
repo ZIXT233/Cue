@@ -80,7 +80,6 @@ html.dark .cq-chat { --user-bg: #2d332b; --tool-bg: #242b24; --bg-hover: #363e32
 .cq-error-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; flex-shrink: 0; }
 .cq-error-actions > button { border: 1px solid var(--cq-line); background: var(--cq-surface); color: var(--cq-ink); border-radius: 7px; padding: 8px 12px; font-size: 12px; }
 .cq-error-actions > .cq-primary { width: auto; margin-top: 0; }
-.cq-harness-debug { border: 0; background: transparent; color: var(--cq-muted); font-size: 11px; text-decoration: underline; padding: 0 2px; }
 .cq-overlay { position: fixed; inset: 0; z-index: 100; background: #242b2850; backdrop-filter: blur(5px); display: flex; justify-content: center; align-items: center; padding: 24px; }
 .cq-dialog { width: 460px; max-width: 100%; background: var(--cq-paper); color: var(--cq-ink); padding: 28px; border: 1px solid var(--cq-line); border-radius: 14px; box-shadow: 0 24px 80px #1e281530; }
 .cq-dialog.cq-error-dialog {
@@ -488,6 +487,21 @@ html.dark .cq-remind-countdown{color:#e2c57e}
 @keyframes cq-arrival-right{0%{opacity:0;transform:translateX(105%)}8%,92%{opacity:1;transform:translateX(0)}100%{opacity:0;transform:translateX(105%)}}
 @media(max-width:700px){.cq-queue-arrival{top:54px;width:min(224px,calc(70% - 8px));min-height:72px;max-height:88px;padding:9px 13px}}
 
+/* External sessions reuse the queue card shell, only the body differs. A warm left
+   edge and the tinted dot flag "not your work" without competing with real cards. */
+.cq-external-card{border-left:3px solid #b78972}
+.cq-external-card .cq-ready-dot{background:#b78972}
+.cq-external-body{display:flex;flex-direction:column;gap:10px;min-height:0;padding:18px 22px;overflow:auto;flex:1 1 auto}
+.cq-external-id{flex:0 0 auto;color:var(--cq-muted);font:11px ui-monospace,monospace}
+.cq-external-reason{margin:0;color:var(--cq-accent);font-size:14px;font-weight:650;line-height:1.35}
+.cq-external-preview{margin:0;color:var(--cq-ink);font-size:13px;line-height:1.6;opacity:.82;white-space:pre-wrap;word-break:break-word}
+.cq-external-tool{align-self:flex-start;margin:0;padding:2px 9px;border-radius:999px;background:color-mix(in srgb,var(--cq-accent) 14%,transparent);color:var(--cq-accent);font:11px ui-monospace,monospace}
+.cq-external-hint{margin:auto 0 0;color:var(--cq-muted);font-size:11px}
+.cq-external-dismiss{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;padding:0;border:1px solid var(--cq-line);border-radius:9px;background:transparent;color:var(--cq-muted);cursor:pointer;transition:background .16s ease,color .16s ease,border-color .16s ease}
+.cq-external-dismiss:hover{background:#fbe3e1;border-color:#e5b2ab;color:#b3443d}
+.cq-external-dismiss:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+@keyframes cq-external-in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+
 .cq-urgent-dialog{width:min(560px,calc(100vw - 32px));max-height:calc(100dvh - 48px);overflow:auto;margin:auto;padding:24px;border:2px solid #bb4438;border-radius:18px;background:#fff;color:#303731;box-shadow:0 24px 80px #241c1c40}
 .cq-urgent-dialog::backdrop{background:#242b2870}
 .cq-urgent-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;color:#a93026;font-size:20px}
@@ -632,7 +646,8 @@ html.dark .cq-card-branches .cq-branch-trigger { background: #2d332b !important;
 .cq-card-title-row h2,.cq-detached .cq-card-title-row h2 { margin: 0; min-width: 0; max-width: 62%; }
 .cq-title-controls { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; margin-left: 12px; }
 .cq-title-branches { height: 26px; flex: 0 0 auto; }
-.cq-title-tools { display: flex; align-items: center; gap: 4px; height: 26px; flex: 0 0 auto; flex-wrap: nowrap; }
+.cq-title-actions { display: flex; align-items: center; gap: 0; height: 26px; flex: 0 0 auto; }
+.cq-title-tools, .cq-title-logs { display: flex; align-items: center; gap: 0; height: 26px; flex: 0 0 auto; flex-wrap: nowrap; }
 .cq-title-environment { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 0 1 auto; color: #58645c; font-size: 13px; font-weight: 500; line-height: 1; cursor: default; }
 .cq-title-environment > span { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .cq-title-environment svg { flex: 0 0 auto; }
@@ -645,7 +660,7 @@ html.dark .cq-card-branches .cq-branch-trigger { background: #2d332b !important;
 @media (max-width: 700px) { .cq-title-primary { gap: 6px; }.cq-title-controls { gap: 4px; margin-left: 7px; }.cq-card-title-row h2,.cq-detached .cq-card-title-row h2 { max-width: 38%; }.cq-title-environment { gap: 6px; font-size: 12px; }.cq-title-host { max-width: 90px; }.cq-title-workspace { max-width: 118px; } }
 .cq-title-branches .cq-branch-trigger { width: auto !important; padding: 0 7px !important; justify-content: center; border: 0 !important; background: transparent !important; color: var(--cq-muted) !important; font-size: 11px; }
 .cq-title-branches .cq-branch-trigger:hover,.cq-title-branches .cq-branch-trigger[aria-pressed=true] { background: var(--cq-line) !important; color: var(--cq-ink) !important; }
-.cq-tools-trigger { display: flex; align-items: center; justify-content: center; gap: 5px; height: 26px; padding: 0 7px; border: 0; border-radius: 6px; background: transparent; color: var(--cq-muted); font: inherit; font-size: 11px; white-space: nowrap; }
+.cq-tools-trigger { display: flex; align-items: center; justify-content: center; gap: 3px; height: 26px; padding: 0 4px; border: 0; border-radius: 6px; background: transparent; color: var(--cq-muted); font: inherit; font-size: 11px; white-space: nowrap; }
 .cq-tools-trigger:hover,.cq-tools-trigger[aria-pressed=true] { background: var(--cq-line); color: var(--cq-ink); }
 .cq-tools-trigger small { display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: color-mix(in srgb,var(--cq-accent) 12%,transparent); color: var(--cq-accent); font-size: 9px; font-variant-numeric: tabular-nums; }
 .cq-inline-tools { position: absolute; top: 82px; left: 22px; right: 22px; z-index: 12; height: min(420px,calc(100% - 170px)); min-height: 220px; overflow: hidden; border: 1px solid var(--cq-line); border-radius: 12px; background: var(--cq-paper); box-shadow: 0 14px 40px #26312426,0 3px 10px #26312414; --bg: var(--cq-paper); --bg-panel: var(--cq-paper); --bg-hover: #f3f4ef; --bg-selected: #ecefe7; --border: var(--cq-line); --text: var(--cq-ink); --text-muted: #747b70; --text-dim: #8b9187; --accent: #6b7d58; }
@@ -957,6 +972,11 @@ html.dark .cq-large-card[data-urgent-call="true"] .cq-card-header {
   background: #3c2929;
   border-bottom-color: #754542;
 }
+
+html.dark .cq-external-card { border-left-color: #a87f63; }
+html.dark .cq-external-card .cq-ready-dot { background: #a87f63; }
+html.dark .cq-external-tool { background: color-mix(in srgb, #d8a982 20%, transparent); color: #d8a982; }
+html.dark .cq-external-dismiss:hover { background: #4a2f2c; border-color: #754542; color: #e79b93; }
 
 html.dark .cq-urgent-dialog {
   border-color: #a45650;

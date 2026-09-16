@@ -6,8 +6,28 @@ use std::path::{Path, PathBuf};
 const START: &str = "__CUE_ENV_START__";
 const END: &str = "__CUE_ENV_END__";
 
+/// The dump spawns PowerShell (Windows) or a login shell (Unix) and costs
+/// seconds per call; the result only seeds child env and command resolution,
+/// so reuse a fresh one for a short window. `force` bypasses and refreshes.
+const ENV_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(60);
+static ENV_CACHE: tokio::sync::Mutex<Option<(std::time::Instant, HashMap<String, String>)>> =
+    tokio::sync::Mutex::const_new(None);
+
 pub async fn local_environment(force: bool) -> AppResult<HashMap<String, String>> {
-    let _ = force;
+    if !force {
+        let cached = ENV_CACHE.lock().await;
+        if let Some((at, env)) = cached.as_ref() {
+            if at.elapsed() < ENV_CACHE_TTL {
+                return Ok(env.clone());
+            }
+        }
+    }
+    let env = dump_local_environment().await?;
+    *ENV_CACHE.lock().await = Some((std::time::Instant::now(), env.clone()));
+    Ok(env)
+}
+
+async fn dump_local_environment() -> AppResult<HashMap<String, String>> {
     let output = if cfg!(windows) {
         let command = format!(
             "$e=@{{}};[Environment]::GetEnvironmentVariables().GetEnumerator()|ForEach-Object{{$e[$_.Key]=[string]$_.Value}};[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false);[Console]::Write('{START}');[Console]::Write(($e|ConvertTo-Json -Compress));[Console]::Write('{END}')"

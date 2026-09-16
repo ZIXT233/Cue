@@ -10,8 +10,7 @@ import { SshAuthChallenge, useSshAuthChallenge } from "./SshAuthChallenge";
 import { machineRequest } from "./RemoteHostsSettings";
 import { needsSshSecret } from "@/lib/workspace-machine-errors";
 import { ErrorDialog } from "./ErrorDialog";
-import { HarnessDebugPanel } from "./HarnessDebugPanel";
-import { developerProbesEnabled } from "@/lib/developer-probes";
+import { saveAndOpenCardLog } from "@/lib/card-log";
 import type { QueueCard } from "@/lib/card-queue";
 
 export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostName, children, onAction, onStartAll }: {
@@ -20,9 +19,9 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
   onStartAll?: () => Promise<void>;
 }) {
   const { t } = useI18n();
-  const developerProbes = developerProbesEnabled();
   const labels = { starting:t("harness.starting"), working:t("harness.working"), attention:t("harness.waiting"), unknown:t("harness.unknown"), exited:t("harness.processNotStarted"), error:t("harness.disconnected") };
   const [target, setTarget] = useState<Element | null>(null);
+  const [toolsTarget, setToolsTarget] = useState<Element | null>(null);
   const [switchPosition, setSwitchPosition] = useState<{ left: number; top: number } | null>(null);
   const [mode] = useState<"cli">("cli");
   const [busy, setBusy] = useState(false);
@@ -34,7 +33,7 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
   const [terminalStatus, setTerminalStatus] = useState<TerminalConnectionStatus>("connecting");
   const [connection, setConnection] = useState(0);
   const [showTranscript, setShowTranscript] = useState(false);
-  const [showDebug, setShowDebug] = useState(false);
+  const [logBusy, setLogBusy] = useState(false);
   const harness = card.harness;
   const [canBackground, setCanBackground] = useState(false);
   const shellTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -73,6 +72,7 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
     const sync = () => {
       const cardEl = document.querySelector(`[data-card-id="${card.id}"]`);
       setTarget(cardEl?.querySelector(".cq-title-harness") ?? null);
+      setToolsTarget(cardEl?.querySelector(".cq-title-logs") ?? null);
       if (!fresh || !active || !cardEl) { setSwitchPosition(null); return; }
       const rect = cardEl.getBoundingClientRect();
       if (rect.width < 8 || rect.height < 8) { setSwitchPosition(null); return; }
@@ -125,19 +125,32 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
     finally { setAuthBusy(false); }
   };
 
-  const controls = fresh ? null : harness ? <div className="cq-harness-controls">
-    {harness.kind === "shell" && harness.shellCommandNotifications !== false && canBackground && !harness.shellNotify && !["error", "exited"].includes(harness.state) && <button type="button" disabled={busy} onClick={() => void act("shell_background")} title={t("harness.backgroundHint")}>↓ {t("harness.background")}</button>}
-    {!disconnected && harness.state !== "attention" && <span className="cq-harness-state" data-state={harness.state} title={probeDetail}>{labels[harness.state]}</span>}
-    {developerProbes && <button type="button" className="cq-harness-debug" disabled={busy} onClick={() => setShowDebug(true)} title={t("harness.debugHint")}>{t("harness.debug")}</button>}
-  </div> : null;
-  const terminal = harness ? <TerminalPanel key={`${harness.terminalId}:${connection}`} embedded remote={harness.remote} themeProfile={harness.kind === "grok" ? "grok" : undefined} conptyCursorHide={harness.kind !== "codex"} readOnly={card.archivedAt !== undefined || harness.state === "exited" || harness.state === "error"} tab={{ id: harness.terminalId, cwd: card.cwd, restored: true }} active={active} focusReporting={harness.kind !== "shell"} inQueue={inQueue}
+  const showBackground = !!harness && harness.kind === "shell" && harness.shellCommandNotifications !== false && canBackground && !harness.shellNotify && !["error", "exited"].includes(harness.state);
+  const showState = !!harness && !disconnected && harness.state !== "attention";
+  const controls = fresh || !harness || (!showBackground && !showState) ? null : <div className="cq-harness-controls">
+    {showBackground && <button type="button" disabled={busy} onClick={() => void act("shell_background")} title={t("harness.backgroundHint")}>↓ {t("harness.background")}</button>}
+    {showState && <span className="cq-harness-state" data-state={harness.state} title={probeDetail}>{labels[harness.state]}</span>}
+  </div>;
+  const logsButton = fresh || !harness ? null : <button type="button" className="cq-tools-trigger" disabled={busy || logBusy} onClick={() => void (async () => {
+    setLogBusy(true);
+    setActionError("");
+    try { await saveAndOpenCardLog(card.id, harness.terminalId); }
+    catch (error) { setActionError(error instanceof Error ? error.message : t("harness.logsFailed")); }
+    finally { setLogBusy(false); }
+  })()} aria-label={t("harness.logsHint")} title={t("harness.logsHint")}>
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" /></svg>
+    <span>{logBusy ? t("harness.logsSaving") : t("harness.logs")}</span>
+  </button>;
+  const terminal = harness ? <TerminalPanel key={`${harness.terminalId}:${connection}`} cardId={card.id} embedded remote={harness.remote} themeProfile={harness.kind === "grok" ? "grok" : undefined} conptyCursorHide={harness.kind !== "codex"} readOnly={card.archivedAt !== undefined || harness.state === "exited" || harness.state === "error"} tab={{ id: harness.terminalId, cwd: card.cwd, restored: true }} active={active} focusReporting={harness.kind !== "shell"} inQueue={inQueue}
     onOutput={harness.kind === "shell" && harness.shellCommandNotifications !== false ? data => shellProbe.current?.(data) : undefined} onStatusChange={setTerminalStatus} onRestart={() => void act(harness.providerSessionId ? "harness_resume" : "harness_reopen")} onClosed={() => {}} onCloseError={() => {}} /> : null;
 
   return <>
     {actionError && <ErrorDialog message={actionError} onDismiss={() => setActionError("")} />}
     {sshHost && <SshAuthChallenge challenge={auth.challenge} hostName={sshHostName || sshHost} busy={authBusy} error={authError} onCancel={() => { auth.clear(); setPendingAction(null); setAuthError(null); }} onRetry={(password, trustedPrompt) => void retryWithSecret(password, trustedPrompt)} />}
-    {developerProbes && showDebug && harness && <HarnessDebugPanel terminalId={harness.terminalId} onClose={() => setShowDebug(false)} />}
-    {fresh ? active && switchPosition && createPortal(<div className="cq-harness-floating" style={switchPosition}>{controls}</div>, document.body) : target && controls && createPortal(controls, target)}
+    {fresh ? active && switchPosition && createPortal(<div className="cq-harness-floating" style={switchPosition}>{controls}</div>, document.body) : <>
+      {target && controls && createPortal(controls, target)}
+      {toolsTarget && logsButton && createPortal(logsButton, toolsTarget)}
+    </>}
     {harness ? <div className="cq-harness-body" data-harness={harness.kind} data-disconnected={disconnected && !showTranscript ? "true" : undefined}>
       {disconnected && !showTranscript && <div className="cq-terminal-recovery" role="status">
         <div className="cq-terminal-recovery-content">

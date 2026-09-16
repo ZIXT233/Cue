@@ -1729,6 +1729,8 @@ span.token.table {
 
 .terminal-panel { --terminal-bg:#fdf6e3; background:var(--terminal-bg); }
 html.dark .terminal-panel { --terminal-bg:#002b36; }
+html[data-terminal-bg="light"] .terminal-panel { --terminal-bg:#fdf6e3; background:var(--terminal-bg); }
+html[data-terminal-bg="dark"] .terminal-panel { --terminal-bg:#002b36; background:var(--terminal-bg); }
 .terminal-panel .terminal-xterm .xterm-viewport { background-color:var(--terminal-bg); }
 html .terminal-panel[data-terminal-theme="campbell"] { --terminal-bg:#0C0C0C; background:var(--terminal-bg); }
 

@@ -1,6 +1,6 @@
 use crate::cwd::{browse, pick_local_folder};
 use crate::error::{AppError, AppResult};
-use crate::harness::{session_exists, HarnessRuntime};
+use crate::harness::{session_exists, ExternalRuntime, HarnessRuntime};
 use crate::hosts::HostStore;
 use crate::live::LiveBus;
 use crate::models::{CardQueue, RemoteHost};
@@ -38,6 +38,9 @@ pub struct AppState {
     pub queue: Arc<QueueStore>,
     pub terminals: TerminalHub,
     pub harness: HarnessRuntime,
+    /// Attention notices from sessions Cue did not launch. Read-only overlay data:
+    /// never part of the queue store, never persisted.
+    pub external: ExternalRuntime,
     pub hosts: Arc<HostStore>,
     pub settings: Arc<SettingsStore>,
     pub live: LiveBus,
@@ -54,7 +57,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/workspace-machines", get(list_machines).post(machine_action))
         .route("/api/cwd/browse", get(browse_cwd))
         .route("/api/tools/settings", get(get_tools).put(put_tools))
+        .route("/api/logs", get(get_logs).post(post_log))
+        .route("/api/logs/report", get(get_log_report).post(export_log_report))
         .route("/api/harness/{id}/debug", get(harness_debug))
+        .route("/api/terminal-theme", get(get_terminal_theme).post(set_terminal_theme))
         .route("/api/terminal", post(create_terminal))
         .route("/api/terminal/{id}", get(get_terminal).post(post_terminal).delete(delete_terminal))
         .route("/api/terminal/{id}/events", get(terminal_events))
@@ -96,17 +102,22 @@ async fn get_queue(State(state): State<AppState>) -> AppResult<impl IntoResponse
 
 async fn post_queue(State(state): State<AppState>, Json(mut body): Json<Value>) -> AppResult<impl IntoResponse> {
     let action = body.get("action").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-    if matches!(action.as_str(), "harness_start" | "harness_reopen" | "harness_restart" | "harness_resume") {
-        return launch_harness(&state, &body, &action).await.map(Json);
+    // External notices live outside the queue: dismissing one never touches queue.json.
+    // The re-read below returns the full snapshot so the notice list arrives without it.
+    if action == "dismiss_external" {
+        let id = body.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+        state.external.dismiss(id);
+    } else if matches!(action.as_str(), "harness_start" | "harness_reopen" | "harness_restart" | "harness_resume") {
+        return launch_harness(&state, &body, &action).await.map(|queue| Json(with_cwd(queue, &state)));
     }
     if action == "workspace_create" && body.get("kind").and_then(|v| v.as_str()) == Some("ssh") {
         let host = body.get("sshHost").and_then(|v| v.as_str()).unwrap_or_default().to_string();
         let cwd_in = body.get("cwd").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
         if regex::Regex::new(r"^[a-zA-Z0-9][a-zA-Z0-9._@:-]*$").unwrap().is_match(&host) && cwd_in.starts_with('/') {
-            crate::debuglog::log(&format!("api: workspace_create validating ssh host={host:?} cwd={cwd_in:?}"));
+            crate::debuglog::debug("api", &format!("workspace_create validate host={host:?} cwd={cwd_in:?}"));
             let resolved = match ssh_exec(&host, &format!("cd {} && pwd -P", shell_quote(&cwd_in))).await {
                 Ok(output) => {
-                    crate::debuglog::log(&format!("api: workspace_create validation OK host={host:?} pwd={:?}", String::from_utf8_lossy(&output).trim()));
+                    crate::debuglog::debug("api", &format!("workspace_create pwd={:?}", String::from_utf8_lossy(&output).trim()));
                     String::from_utf8_lossy(&output).trim().to_string()
                 }
                 Err(error) => {
@@ -123,13 +134,19 @@ async fn post_queue(State(state): State<AppState>, Json(mut body): Json<Value>) 
             }
         }
     }
+    // dismiss_external already did its work above and has no queue-side action; every
+    // other action goes through apply_action. Both share this one read+response path.
+    let dismissing = action == "dismiss_external";
     let queue = state.queue.with_queue(false, |queue| {
         refresh_queue(queue, &state);
+        if dismissing {
+            return Ok(queue.clone());
+        }
         apply_action(queue, &body, &action, &state)?;
         refresh_queue(queue, &state);
         Ok(queue.clone())
     }).await?;
-    Ok(Json(queue))
+    Ok(Json(with_cwd(queue, &state)))
 }
 
 struct LaunchGuard {
@@ -205,7 +222,20 @@ async fn launch_harness(state: &AppState, body: &Value, action: &str) -> AppResu
                 || session.provider_session_id.as_deref().is_some_and(|id| session_exists(&session.kind, id) != Some(false))
         })
     };
-    let launched = state.harness.launch(kind, &captured.1, resume.clone(), &state.terminals, &state.settings, &state.bin_dir).await?;
+    let launched = match state.harness.launch(kind, &captured.1, resume.clone(), &state.terminals, &state.settings, &state.bin_dir).await {
+        Ok(session) => session,
+        Err(error) => {
+            crate::debuglog::log_error(&format!("harness launch card={id} kind={kind} action={action}"), &error);
+            return Err(error);
+        }
+    };
+    crate::debuglog::bind_term(&launched.terminal_id, id);
+    crate::debuglog::info_card(
+        "harness",
+        id,
+        Some(&launched.terminal_id),
+        &format!("launch kind={kind} action={action} state={}", launched.state),
+    );
     let previous_id = captured.0.harness.as_ref().map(|h| h.terminal_id.clone());
     let result = state.queue.with_queue(false, |queue| {
         let workspace = queue.workspaces.as_ref().and_then(|ws| ws.iter().find(|w| w.id == captured.1.id)).cloned();
@@ -263,6 +293,7 @@ fn apply_action(queue: &mut CardQueue, body: &Value, action: &str, state: &AppSt
         }
         "harness_close" => {
             let card = queue.cards.iter_mut().find(|c| Some(c.id.as_str()) == id).ok_or_else(|| AppError::msg("CLI 卡片不存在"))?;
+            crate::debuglog::info_card("queue", &card.id, card.harness.as_ref().map(|h| h.terminal_id.as_str()), "harness_close");
             kill_side_terminals(state, card);
             card.side_terminals = None;
             card.side_terminal_open = None;
@@ -379,6 +410,7 @@ fn apply_action(queue: &mut CardQueue, body: &Value, action: &str, state: &AppSt
             let workspace_id = body.get("workspaceId").and_then(|v| v.as_str()).unwrap_or_default();
             let workspace = queue.workspaces.as_ref().and_then(|ws| ws.iter().find(|w| w.id == workspace_id)).cloned().ok_or_else(|| AppError::msg("请选择一个工作区"))?;
             select_workspace_for_draft(queue, &workspace);
+            crate::debuglog::info("queue", &format!("create workspace={}", workspace.id));
         }
         "remind_later" => {
             let minutes = body.get("minutes").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -402,6 +434,7 @@ fn apply_action(queue: &mut CardQueue, body: &Value, action: &str, state: &AppSt
         "front" | "back" => move_card(queue, id.unwrap_or_default(), action),
         "archive" => {
             if let Some(card) = queue.cards.iter().find(|c| Some(c.id.as_str()) == id) {
+                crate::debuglog::info_card("queue", &card.id, card.harness.as_ref().map(|h| h.terminal_id.as_str()), "archive");
                 if let Some(harness) = &card.harness { state.terminals.stop(&harness.terminal_id); }
                 kill_side_terminals(state, card);
             }
@@ -414,6 +447,7 @@ fn apply_action(queue: &mut CardQueue, body: &Value, action: &str, state: &AppSt
         }
         "restore" => {
             let card = queue.cards.iter_mut().find(|c| Some(c.id.as_str()) == id).ok_or_else(|| AppError::msg("卡片已不存在"))?;
+            crate::debuglog::info_card("queue", &card.id, None, "restore");
             card.archived_at = None;
             move_card(queue, id.unwrap_or_default(), "front");
         }
@@ -421,6 +455,7 @@ fn apply_action(queue: &mut CardQueue, body: &Value, action: &str, state: &AppSt
             if let Some(card) = queue.cards.iter().find(|c| Some(c.id.as_str()) == id) {
                 if matches!(card.phase, crate::models::CardPhase::Working) { return Err(AppError::msg("请先处理等待中的交互，或停止正在运行的会话")); }
                 if card.detached.is_some() { return Err(AppError::msg("请先收回独立窗口")); }
+                crate::debuglog::info_card("queue", &card.id, card.harness.as_ref().map(|h| h.terminal_id.as_str()), "remove");
                 if let Some(harness) = &card.harness { state.terminals.kill(&harness.terminal_id); }
                 kill_side_terminals(state, card);
             }
@@ -434,18 +469,24 @@ fn apply_action(queue: &mut CardQueue, body: &Value, action: &str, state: &AppSt
             if let Some(detached) = &card.detached {
                 if detached.owner != owner { return Err(AppError::msg("该卡片已经在另一个窗口打开")); }
             }
+            crate::debuglog::info_card("queue", &card.id, card.harness.as_ref().map(|h| h.terminal_id.as_str()), "detach");
             card.detached = Some(crate::models::DetachedLease { owner: owner.into(), expires_at: now_ms() + TAB_LEASE_MS });
         }
         "release" => {
             let owner = body.get("owner").and_then(|v| v.as_str()).unwrap_or_default();
             if let Some(card) = queue.cards.iter_mut().find(|c| Some(c.id.as_str()) == id) {
-                if card.detached.as_ref().is_some_and(|d| d.owner == owner) { card.detached = None; }
+                if card.detached.as_ref().is_some_and(|d| d.owner == owner) {
+                    crate::debuglog::info_card("queue", &card.id, None, "return");
+                    card.detached = None;
+                }
             }
         }
         "side_terminal_add" => {
             let card = queue.cards.iter_mut().find(|c| Some(c.id.as_str()) == id).ok_or_else(|| AppError::msg("卡片已不存在"))?;
             let terminal_id = body.get("terminalId").and_then(|v| v.as_str()).unwrap_or_default();
             if !valid_side_terminal_id(terminal_id) { return Err(AppError::msg("无效的终端")); }
+            crate::debuglog::bind_term(terminal_id, &card.id);
+            crate::debuglog::info_card("queue", &card.id, Some(terminal_id), "side_terminal_add");
             let cwd = body.get("cwd").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()).unwrap_or(card.cwd.as_str()).to_string();
             let tabs = card.side_terminals.get_or_insert_with(Vec::new);
             if !tabs.iter().any(|tab| tab.id == terminal_id) {
@@ -464,6 +505,8 @@ fn apply_action(queue: &mut CardQueue, body: &Value, action: &str, state: &AppSt
                     }
                 }
             }
+            crate::debuglog::info_card("queue", id.unwrap_or(""), Some(terminal_id), "side_terminal_remove");
+            crate::debuglog::unbind_term(terminal_id);
             state.terminals.kill(terminal_id);
         }
         "side_terminal_open" => {
@@ -491,10 +534,7 @@ async fn list_machines(State(state): State<AppState>) -> AppResult<impl IntoResp
 
 async fn machine_action(State(state): State<AppState>, Json(body): Json<Value>) -> impl IntoResponse {
     let action = body.get("action").and_then(|v| v.as_str()).unwrap_or_default();
-    crate::debuglog::log(&format!(
-        "machine_action: action={action} body_keys={:?}",
-        body.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()).unwrap_or_default()
-    ));
+    crate::debuglog::debug("api", &format!("machines.{action}"));
     match machine_action_inner(&state, body).await {
         Ok(value) => (StatusCode::OK, Json(value)).into_response(),
         Err(error) => {
@@ -562,7 +602,7 @@ async fn machine_action_inner(state: &AppState, body: Value) -> AppResult<Value>
             // The editor submits an unsaved host (hostname/user/port only), so a
             // full RemoteHost parse would fail; accept the partial form instead.
             let input: TestHostInput = serde_json::from_value(body.get("host").cloned().unwrap_or(json!({})))?;
-            crate::debuglog::log(&format!("api: machines.test host={:?} user={:?} port={:?} password={} trustedPrompt={}", input.hostname, input.user, input.port, body.get("password").is_some(), body.get("trustedPrompt").is_some()));
+            crate::debuglog::info("ssh", &format!("test host={:?} user={:?} port={:?}", input.hostname, input.user, input.port));
             let target = RemoteHost {
                 id: input.hostname.clone(),
                 name: input.hostname.clone(),
@@ -576,7 +616,7 @@ async fn machine_action_inner(state: &AppState, body: Value) -> AppResult<Value>
             };
             match test_target(target, password(&body)?, trusted(&body)).await {
                 Ok(()) => {
-                    crate::debuglog::log("api: machines.test OK");
+                    crate::debuglog::info("ssh", "test ok");
                     Ok(json!({ "ok": true }))
                 }
                 Err(error) => {
@@ -594,9 +634,9 @@ async fn machine_action_inner(state: &AppState, body: Value) -> AppResult<Value>
         }
         "test-host" | "connect" => {
             let host = body.get("host").and_then(|v| v.as_str()).ok_or_else(|| AppError::machine("HOST_INVALID"))?;
-            crate::debuglog::log(&format!("api: machines.{action} host={host:?} password={} trustedPrompt={}", body.get("password").is_some(), body.get("trustedPrompt").is_some()));
+            crate::debuglog::info("ssh", &format!("{action} host={host:?}"));
             match connect_host(host, password(&body)?, trusted(&body)).await {
-                Ok(()) => crate::debuglog::log(&format!("api: machines.{action} connect OK host={host:?}")),
+                Ok(()) => crate::debuglog::info("ssh", &format!("{action} ok host={host:?}")),
                 Err(error) => {
                     crate::debuglog::log_error(&format!("api: machines.{action} connect FAILED host={host:?}"), &error);
                     return Err(error);
@@ -605,7 +645,7 @@ async fn machine_action_inner(state: &AppState, body: Value) -> AppResult<Value>
             if action == "connect" {
                 let cwd = match ssh_exec(host, r#"printf "%s" "$HOME""#).await {
                     Ok(bytes) => {
-                        crate::debuglog::log(&format!("api: machines.connect home={:?}", String::from_utf8_lossy(&bytes)));
+                        crate::debuglog::debug("ssh", &format!("connect home={:?}", String::from_utf8_lossy(&bytes)));
                         String::from_utf8_lossy(&bytes).into_owned()
                     }
                     Err(error) => {
@@ -654,30 +694,172 @@ async fn browse_cwd(Query(query): Query<BrowseQuery>) -> AppResult<impl IntoResp
     Ok(Json(browse(query.path)?))
 }
 
-async fn get_tools(State(state): State<AppState>) -> AppResult<impl IntoResponse> {
-    let settings = state.settings.read()?;
-    Ok(Json(json!({
+fn tools_json(settings: &crate::models::AppSettings) -> Value {
+    json!({
         "isWindows": cfg!(windows),
         "powerShellEnabled": settings.powershell_enabled,
         "developerProbes": crate::dev_tools::probes_enabled(),
-    })))
+        "debugLogging": crate::debuglog::verbose(),
+        "logPath": crate::debuglog::log_path().to_string_lossy(),
+        "logDir": crate::paths::logs_dir().to_string_lossy(),
+    })
+}
+
+async fn get_tools(State(state): State<AppState>) -> AppResult<impl IntoResponse> {
+    Ok(Json(tools_json(&state.settings.read()?)))
 }
 
 async fn put_tools(State(state): State<AppState>, Json(body): Json<Value>) -> AppResult<impl IntoResponse> {
+    if let Some(enabled) = body.get("debugLogging").and_then(|v| v.as_bool()) {
+        let settings = state.settings.set_debug_logging(enabled).await?;
+        return Ok(Json(tools_json(&settings)));
+    }
     let enabled = body.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
     let settings = state.settings.set_powershell(enabled).await?;
-    Ok(Json(json!({
-        "isWindows": cfg!(windows),
-        "powerShellEnabled": settings.powershell_enabled,
-        "developerProbes": crate::dev_tools::probes_enabled(),
-    })))
+    Ok(Json(tools_json(&settings)))
 }
 
 async fn harness_debug(State(state): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
-    if !crate::dev_tools::probes_enabled() {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not found" }))).into_response();
-    }
     Json(state.harness.debug_snapshot(&id, &state.terminals)).into_response()
+}
+
+#[derive(Deserialize)]
+struct LogsQuery {
+    card: Option<String>,
+    term: Option<String>,
+    bytes: Option<usize>,
+}
+
+async fn get_logs(Query(query): Query<LogsQuery>) -> impl IntoResponse {
+    let mut text = crate::debuglog::read_tail(query.bytes.unwrap_or(256 * 1024).min(2 * 1024 * 1024));
+    if query.card.is_some() || query.term.is_some() {
+        text = crate::debuglog::filter_text(&text, query.card.as_deref(), query.term.as_deref());
+    }
+    ([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], text)
+}
+
+#[derive(Deserialize)]
+struct FrontLog {
+    #[serde(default)]
+    level: Option<String>,
+    #[serde(default)]
+    sys: Option<String>,
+    #[serde(default)]
+    card: Option<String>,
+    #[serde(default)]
+    term: Option<String>,
+    #[serde(default)]
+    msg: Option<String>,
+}
+
+async fn post_log(Json(body): Json<FrontLog>) -> impl IntoResponse {
+    let level = match body.level.as_deref().unwrap_or("info") {
+        "error" => crate::debuglog::Level::Error,
+        "warn" | "warning" => crate::debuglog::Level::Warn,
+        "debug" => crate::debuglog::Level::Debug,
+        "trace" => crate::debuglog::Level::Trace,
+        _ => crate::debuglog::Level::Info,
+    };
+    let sys = body.sys.as_deref().filter(|s| !s.is_empty()).unwrap_or("ui");
+    let msg = body.msg.as_deref().unwrap_or("");
+    if msg.len() > 4000 {
+        return StatusCode::BAD_REQUEST;
+    }
+    if let Some(card) = body.card.as_deref().filter(|s| !s.is_empty()) {
+        if let Some(term) = body.term.as_deref().filter(|s| !s.is_empty()) {
+            crate::debuglog::bind_term(term, card);
+        }
+    }
+    crate::debuglog::write(level, sys, body.card.as_deref(), body.term.as_deref(), msg);
+    StatusCode::NO_CONTENT
+}
+
+fn resolve_report_term(state: &AppState, card_id: Option<&str>, term_id: Option<&str>) -> Option<String> {
+    if let Some(term) = term_id.filter(|s| !s.is_empty()) {
+        return Some(term.to_string());
+    }
+    let card_id = card_id?;
+    state.queue.read_snapshot().ok()?.cards.into_iter().find(|c| c.id == card_id).and_then(|c| c.harness.map(|h| h.terminal_id))
+}
+
+fn card_report_text(state: &AppState, card_id: Option<&str>, term_id: Option<&str>, extra: Option<&str>) -> String {
+    let term_id = resolve_report_term(state, card_id, term_id);
+    let card = card_id.and_then(|id| {
+        state.queue.read_snapshot().ok()?.cards.into_iter().find(|c| c.id == id)
+    });
+    let mut out = String::from("# Cue card report\n");
+    if let Some(card) = &card {
+        out.push_str(&format!(
+            "card={} phase={:?} workspace={:?} cwd={} detached={} archived={}\n",
+            card.id,
+            card.phase,
+            card.workspace_id,
+            card.cwd,
+            card.detached.is_some(),
+            card.archived_at.is_some()
+        ));
+        if let Some(harness) = &card.harness {
+            out.push_str(&format!(
+                "harness kind={} state={} term={} remote={:?} probe={:?}\n",
+                harness.kind, harness.state, harness.terminal_id, harness.remote, harness.probe
+            ));
+        }
+        if let Some(tabs) = &card.side_terminals {
+            out.push_str(&format!("side_terminals={}\n", tabs.iter().map(|t| t.id.as_str()).collect::<Vec<_>>().join(",")));
+        }
+    } else if let Some(card) = card_id {
+        out.push_str(&format!("card={card} (not in queue)\n"));
+    }
+    if let Some(term) = &term_id {
+        let snap = state.harness.debug_snapshot(term, &state.terminals);
+        out.push_str("\n# harness\n");
+        out.push_str(&serde_json::to_string_pretty(&snap).unwrap_or_else(|_| "{}".into()));
+        out.push('\n');
+    }
+    if let Some(extra) = extra.filter(|s| !s.is_empty()) {
+        out.push_str("\n# extra\n");
+        out.push_str(extra);
+        out.push('\n');
+    }
+    out.push_str("\n# log\n");
+    let logs = crate::debuglog::read_tail(256 * 1024);
+    out.push_str(&crate::debuglog::filter_text(&logs, card_id, term_id.as_deref()));
+    out.push('\n');
+    out
+}
+
+fn report_file_name(card_id: Option<&str>, term_id: Option<&str>) -> String {
+    let raw = card_id.or(term_id).unwrap_or("unknown");
+    let safe: String = raw.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').take(80).collect();
+    format!("card-{safe}.txt")
+}
+
+async fn get_log_report(State(state): State<AppState>, Query(query): Query<LogsQuery>) -> impl IntoResponse {
+    let text = card_report_text(&state, query.card.as_deref(), query.term.as_deref(), None);
+    ([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], text)
+}
+
+#[derive(Deserialize)]
+struct ExportReport {
+    #[serde(default, alias = "card", alias = "cardId")]
+    card_id: Option<String>,
+    #[serde(default, alias = "term", alias = "termId")]
+    term_id: Option<String>,
+    #[serde(default)]
+    extra: Option<String>,
+}
+
+async fn export_log_report(State(state): State<AppState>, Json(body): Json<ExportReport>) -> AppResult<impl IntoResponse> {
+    let text = card_report_text(&state, body.card_id.as_deref(), body.term_id.as_deref(), body.extra.as_deref());
+    let dir = crate::paths::logs_dir();
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(report_file_name(body.card_id.as_deref(), body.term_id.as_deref()));
+    crate::paths::atomic_write(&path, &text)?;
+    crate::debuglog::info("app", &format!("wrote card report {}", path.display()));
+    Ok(Json(json!({
+        "path": path.to_string_lossy(),
+        "logDir": dir.to_string_lossy(),
+    })))
 }
 
 async fn get_terminal(State(state): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
@@ -685,6 +867,18 @@ async fn get_terminal(State(state): State<AppState>, Path(id): Path<String>) -> 
         Some(cwd) => (StatusCode::OK, Json(json!({ "id": id, "cwd": cwd, "readOnly": state.terminals.snapshot(&id).map(|s| s.exited).unwrap_or(true) }))).into_response(),
         None => (StatusCode::NOT_FOUND, Json(json!({ "error": "Terminal expired or closed" }))).into_response(),
     }
+}
+
+async fn set_terminal_theme(State(state): State<AppState>, Json(body): Json<Value>) -> impl IntoResponse {
+    state.terminals.apply_canvas_dark(body.get("dark").and_then(|v| v.as_bool()).unwrap_or(false));
+    StatusCode::NO_CONTENT
+}
+
+/// Whether local sessions must keep the Campbell palette: true only when the
+/// bundled modern ConPTY is unavailable and the inbox kernel32 build is in use.
+async fn get_terminal_theme() -> impl IntoResponse {
+    let conpty_fallback = cfg!(windows) && !crate::conpty::sideloaded();
+    Json(json!({ "conptyFallback": conpty_fallback }))
 }
 
 async fn create_terminal(State(state): State<AppState>, Json(body): Json<Value>) -> impl IntoResponse {
@@ -695,12 +889,15 @@ async fn create_terminal(State(state): State<AppState>, Json(body): Json<Value>)
 }
 
 fn create_terminal_inner(state: &AppState, body: &Value) -> AppResult<String> {
-    crate::debuglog::log(&format!(
-        "api: terminal create request cwd={:?} sshHost={:?} id={:?}",
-        body.get("cwd").and_then(|v| v.as_str()).unwrap_or(""),
-        body.get("sshHost").and_then(|v| v.as_str()),
-        body.get("id").and_then(|v| v.as_str())
-    ));
+    crate::debuglog::debug(
+        "pty",
+        &format!(
+            "create cwd={:?} sshHost={:?} id={:?}",
+            body.get("cwd").and_then(|v| v.as_str()).unwrap_or(""),
+            body.get("sshHost").and_then(|v| v.as_str()),
+            body.get("id").and_then(|v| v.as_str())
+        ),
+    );
     if let Some(id) = body.get("id") {
         let Some(id) = id.as_str() else {
             return Err(AppError::msg("Invalid terminal id"));
@@ -716,16 +913,16 @@ fn create_terminal_inner(state: &AppState, body: &Value) -> AppResult<String> {
     let cols = json_dimension(body.get("cols")).unwrap_or(80);
     let rows = json_dimension(body.get("rows")).unwrap_or(24);
     let id = body.get("id").and_then(|v| v.as_str()).map(str::to_string);
-    match terminal_target(cwd, terminal_ssh_host(body)?)? {
-        TerminalTarget::Local(cwd) => {
-            crate::debuglog::log(&format!("api: terminal create -> LOCAL shell in {}", cwd.display()));
-            state.terminals.create_shell(cwd.to_string_lossy().into_owned(), cols, rows, id)
-        }
-        TerminalTarget::Remote { host, directory } => {
-            crate::debuglog::log(&format!("api: terminal create -> REMOTE shell host={host:?} dir={directory:?}"));
-            state.terminals.create_remote_shell(directory, cols, rows, id, host)
+    let created = match terminal_target(cwd, terminal_ssh_host(body)?)? {
+        TerminalTarget::Local(cwd) => state.terminals.create_shell(cwd.to_string_lossy().into_owned(), cols, rows, id),
+        TerminalTarget::Remote { host, directory } => state.terminals.create_remote_shell(directory, cols, rows, id, host),
+    };
+    if let Ok(term) = &created {
+        if let Some(card) = body.get("cardId").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            crate::debuglog::bind_term(term, card);
         }
     }
+    created
 }
 
 /// Where a new terminal runs.
@@ -899,6 +1096,8 @@ async fn post_terminal_inner(state: &AppState, id: &str, request: Request) -> Ap
 }
 
 async fn delete_terminal(State(state): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
+    crate::debuglog::info_term("pty", &id, "kill");
+    crate::debuglog::unbind_term(&id);
     state.terminals.kill(&id);
     Json(json!({ "success": true }))
 }
@@ -921,8 +1120,10 @@ async fn terminal_events(
         .filter(|s| s.chars().all(|c| c.is_ascii_digit()))
         .and_then(|s| s.parse().ok());
     let Some((output, rx, exited, code)) = state.terminals.subscribe(&id, after) else {
+        crate::debuglog::warn_term("sse", &id, "subscribe missed (terminal gone)");
         return (StatusCode::NOT_FOUND, "Terminal not found").into_response();
     };
+    crate::debuglog::debug_term("sse", &id, &format!("subscribe after={after:?} exited={exited}"));
     let mut initial = vec![sse_event(&output)];
     if exited {
         initial.push(sse_event(&TerminalEvent::Exit { exit_code: code.unwrap_or(0) }));
@@ -948,6 +1149,9 @@ fn with_cwd(queue: CardQueue, state: &AppState) -> Value {
     let mut value = serde_json::to_value(queue).unwrap_or(json!({}));
     if let Some(obj) = value.as_object_mut() {
         obj.insert("defaultCwd".into(), json!(state.default_cwd));
+        // External sessions ride along in the snapshot so the deck can show them
+        // without the queue store ever learning they exist.
+        obj.insert("external".into(), json!(state.external.notices()));
     }
     value
 }
@@ -966,10 +1170,14 @@ pub fn build_state(resource_dir: Option<PathBuf>) -> AppState {
     let live = LiveBus::new();
     let settings = Arc::new(SettingsStore::new());
     let _ = settings.load_for_boot();
+    // Built before the runtime so the signal watcher can stamp hook latency
+    // straight onto the PTY probe (see `TerminalHub::record_first_hook`).
+    let terminals = TerminalHub::new(live.clone());
     AppState {
         queue: Arc::new(QueueStore::new(live.clone())),
-        terminals: TerminalHub::new(live.clone()),
-        harness: HarnessRuntime::new(live.clone()),
+        terminals: terminals.clone(),
+        harness: HarnessRuntime::new(live.clone(), terminals),
+        external: ExternalRuntime::new(live.clone()),
         hosts: Arc::new(HostStore::new()),
         settings,
         live,

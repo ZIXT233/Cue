@@ -21,7 +21,19 @@ pub enum TerminalEvent {
     /// `from` is the byte offset where `data` starts, `offset` where it ends.
     /// Clients use `from` to detect gaps in the stream and resync instead of
     /// rendering a hole as terminal garbage.
-    Output { data: String, from: u64, offset: u64, #[serde(skip_serializing_if = "Option::is_none")] reset: Option<bool> },
+    ///
+    /// `dropped` is set only on a reset that had to sacrifice bytes: the client's
+    /// cursor pointed before the oldest byte we still hold, so the replay cannot
+    /// be a superset of what it already saw. Without this the client cannot tell
+    /// "first attach, nothing lost" from "trimmed, the head is gone", and a real
+    /// hole gets presented as a clean redraw.
+    Output {
+        data: String,
+        from: u64,
+        offset: u64,
+        #[serde(skip_serializing_if = "Option::is_none")] reset: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")] dropped: Option<u64>,
+    },
     Exit { #[serde(rename = "exitCode")] exit_code: i32 },
     Closed,
 }
@@ -70,9 +82,33 @@ pub struct PtyProbe {
     pub ioctl_cols: Option<u16>,
     pub ioctl_rows: Option<u16>,
     pub on_output_panic: u64,
+    /// Milliseconds from spawn to the CLI's first output byte. This is the one
+    /// number that splits a slow card in two: everything before it is the CLI
+    /// booting, everything after belongs to its first hook landing. Without it
+    /// the whole window is a black box and "the card took 22s" has no owner.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_byte_ms: Option<u64>,
+    /// Milliseconds from spawn to the first hook signal for this terminal. Only
+    /// meaningful once a hook has arrived; `None` means none ever did. Stamped
+    /// by the harness when the signal lands, since the PTY layer never sees a
+    /// hook — it only carries the bytes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_hook_ms: Option<u64>,
+    /// Spawn instant, kept so a late reader can derive its own deltas.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spawned_at_ms: Option<u64>,
     /// "local" or "ssh" — makes it obvious which pipeline a session used.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transport: Option<String>,
+    /// Reconnects where the client's cursor had fallen behind the oldest byte we
+    /// still held, summed in bytes. This is the only counter here that represents
+    /// data the user actually lost; `send_fail` counts ordinary pauses and
+    /// `backlog_bytes` is just current occupancy.
+    pub replay_dropped_bytes: u64,
+    /// How many resets we served because of such a loss (vs. a clean first
+    /// attach). A rising count with a large `replay_dropped_bytes` means
+    /// MAX_BACKLOG is too small for this session's output rate.
+    pub replay_trimmed: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -167,6 +203,14 @@ struct Record {
     listeners_tx: Vec<mpsc::UnboundedSender<TerminalEvent>>,
     dirty: bool,
     probe: Arc<Mutex<PtyProbe>>,
+    canvas_dark: bool,
+    canvas_campbell: bool,
+    theme_notify: bool,
+    /// Cumulative bytes lost to backlog trimming on reconnect (see `subscribe`).
+    replay_dropped_bytes: u64,
+    /// How many times that happened, so a single large loss is distinguishable
+    /// from a steady drip.
+    replay_trimmed: u64,
 }
 
 #[derive(Clone)]
@@ -221,17 +265,39 @@ impl TerminalHub {
             Spawn::Local { .. } => "local",
             Spawn::Remote { .. } => "ssh",
         };
-        crate::debuglog::log(&format!(
-            "terminal: hub create id={id} transport={transport} cwd={cwd:?}{}",
-            match &spawn {
-                Spawn::Local { executable, .. } => format!(" executable={executable:?}"),
-                Spawn::Remote { host, command } => format!(" host={host:?} cmd={}", crate::debuglog::clip(command, 160)),
-            }
-        ));
-        let probe = Arc::new(Mutex::new(PtyProbe { reader_alive: true, transport: Some(transport.into()), ..PtyProbe::default() }));
+        crate::debuglog::info_term(
+            "pty",
+            &id,
+            &format!(
+                "spawn {transport} cwd={cwd:?} {cols}x{rows}{}",
+                match &spawn {
+                    Spawn::Local { executable, .. } => format!(" exe={executable}"),
+                    Spawn::Remote { host, .. } => format!(" host={host}"),
+                }
+            ),
+        );
+        // Stamped here rather than at register(): the gap this probe exists to
+        // measure starts when we hand the command to the OS, not when the
+        // bookkeeping record appears.
+        let spawned_at_ms = crate::queue::now_ms().max(0) as u64;
+        let probe = Arc::new(Mutex::new(PtyProbe {
+            reader_alive: true,
+            transport: Some(transport.into()),
+            spawned_at_ms: Some(spawned_at_ms),
+            ..PtyProbe::default()
+        }));
+        // Second chance if the startup preload missed the bundled conpty.dll;
+        // decides whether Windows-local answers may follow the app theme.
+        #[cfg(windows)]
+        let _ = crate::conpty::ensure_loaded();
+        // Campbell is only a fallback for the inbox ConPTY (whose default
+        // canvas is #0C0C0C). With the bundled modern ConPTY the answered
+        // colors follow the app theme like every other transport.
+        let campbell = cfg!(windows) && matches!(spawn, Spawn::Local { .. }) && !crate::conpty::sideloaded();
+        let canvas_dark = if campbell { true } else { spawn_canvas_dark(&spawn) };
         match spawn {
-            Spawn::Local { executable, args, env } => self.spawn_local(cwd, cols, rows, id.clone(), executable, args, env, persistent, on_output, probe)?,
-            Spawn::Remote { host, command } => self.spawn_remote(cwd, cols, rows, id.clone(), host, command, persistent, on_output, probe),
+            Spawn::Local { executable, args, env } => self.spawn_local(cwd, cols, rows, id.clone(), executable, args, env, persistent, on_output, probe, canvas_dark, campbell)?,
+            Spawn::Remote { host, command } => self.spawn_remote(cwd, cols, rows, id.clone(), host, command, persistent, on_output, probe, canvas_dark),
         }
         Ok(id)
     }
@@ -249,6 +315,8 @@ impl TerminalHub {
         persistent: bool,
         on_output: Option<Arc<dyn Fn(&str) + Send + Sync>>,
         probe: Arc<Mutex<PtyProbe>>,
+        canvas_dark: bool,
+        campbell: bool,
     ) -> AppResult<()> {
         let pty_system = native_pty_system();
         let pair = pty_system.openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 }).map_err(|e| AppError::msg(e.to_string()))?;
@@ -266,6 +334,14 @@ impl TerminalHub {
         cmd.env_remove("NO_COLOR");
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
+        if campbell {
+            // Fallback (inbox ConPTY): its default table is Campbell (#0C0C0C).
+            // A Solarized COLORFGBG would tell the CLI the canvas is cream
+            // while the emulator stays black.
+            cmd.env("COLORFGBG", crate::terminal_theme::colorfgbg(true));
+        } else if cmd.get_env("COLORFGBG").is_none() {
+            cmd.env("COLORFGBG", crate::terminal_theme::colorfgbg(canvas_dark));
+        }
         if cmd.get_env("LANG").is_none() && cmd.get_env("LC_ALL").is_none() && cmd.get_env("LC_CTYPE").is_none() {
             cmd.env("LANG", "C.UTF-8");
         }
@@ -278,7 +354,7 @@ impl TerminalHub {
             master: Mutex::new(Some(pair.master)),
             killer: Mutex::new(Some(killer)),
         });
-        self.register(id.clone(), cwd, persistent, on_output, channel, probe.clone());
+        self.register(id.clone(), cwd, persistent, on_output, channel, probe.clone(), canvas_dark, campbell);
 
         let inner = self.inner.clone();
         let live = self.live.clone();
@@ -289,12 +365,8 @@ impl TerminalHub {
                     Ok(0) => break,
                     Ok(n) => deliver(&inner, &id, &probe, &buffer[..n]),
                     Err(error) => {
-                        #[cfg(debug_assertions)]
-                        if crate::dev_tools::probes_enabled() {
-                            lock(&probe).last_error = Some(error.to_string());
-                        }
-                        #[cfg(not(debug_assertions))]
-                        let _ = error;
+                        crate::debuglog::warn_term("pty", &id, &format!("reader error: {error}"));
+                        lock(&probe).last_error = Some(error.to_string());
                         break;
                     }
                 }
@@ -320,10 +392,11 @@ impl TerminalHub {
         persistent: bool,
         on_output: Option<Arc<dyn Fn(&str) + Send + Sync>>,
         probe: Arc<Mutex<PtyProbe>>,
+        canvas_dark: bool,
     ) {
         let (commands, queue) = mpsc::unbounded_channel();
         let channel: Arc<dyn Channel> = Arc::new(RemoteChannel { commands, size: Mutex::new((cols, rows)), closed: AtomicBool::new(false) });
-        self.register(id.clone(), cwd, persistent, on_output, channel, probe.clone());
+        self.register(id.clone(), cwd, persistent, on_output, channel, probe.clone(), canvas_dark, false);
 
         let inner = self.inner.clone();
         let live = self.live.clone();
@@ -331,18 +404,15 @@ impl TerminalHub {
         let sink_id = id.clone();
         let sink_probe = probe.clone();
         tokio::spawn(async move {
-            crate::debuglog::log(&format!("terminal: remote spawn id={id} host={host:?} {cols}x{rows} cmd={}", crate::debuglog::clip(&command, 200)));
+            crate::debuglog::debug_term("pty", &id, &format!("remote run host={host:?} {cols}x{rows}"));
             let result = crate::remote::run_pty(&host, &command, cols, rows, move |data: Vec<u8>| {
                 deliver(&sink_inner, &sink_id, &sink_probe, &data);
             }, queue)
             .await;
             let code = match result {
-                Ok(code) => {
-                    crate::debuglog::log(&format!("terminal: remote spawn id={id} ended with exit code {code}"));
-                    code
-                }
+                Ok(code) => code,
                 Err(error) => {
-                    crate::debuglog::log_error(&format!("terminal: remote spawn id={id} FAILED"), &error);
+                    crate::debuglog::log_error(&format!("terminal remote spawn id={id}"), &error);
                     // Report the failure in the pane, where `ssh`'s own stderr
                     // used to land, instead of silently ending the session.
                     let text = format!("\r\n\x1b[31m{error}\x1b[0m\r\n");
@@ -363,6 +433,8 @@ impl TerminalHub {
         on_output: Option<Arc<dyn Fn(&str) + Send + Sync>>,
         channel: Arc<dyn Channel>,
         probe: Arc<Mutex<PtyProbe>>,
+        canvas_dark: bool,
+        canvas_campbell: bool,
     ) {
         let mut map = self.lock();
         map.insert(id, Record {
@@ -380,7 +452,35 @@ impl TerminalHub {
             listeners_tx: Vec::new(),
             dirty: false,
             probe,
+            canvas_dark,
+            canvas_campbell,
+            theme_notify: false,
+            replay_dropped_bytes: 0,
+            replay_trimmed: 0,
         });
+    }
+
+    /// Push a theme change to every live session that follows the app theme.
+    /// Campbell-fallback records stay pinned to dark: their palette matches
+    /// the inbox ConPTY's default canvas, which never follows our theme.
+    pub fn apply_canvas_dark(&self, dark: bool) {
+        crate::terminal_theme::set_app_dark(dark);
+        let pending: Vec<(Arc<dyn Channel>, String)> = {
+            let mut map = self.lock();
+            map.values_mut()
+                // Only CLIs that asked for theme reports (DECSET 2031) can
+                // consume CSI ?997;1n; for everyone else it is unexpected
+                // input that ConPTY echoes straight onto their prompt.
+                .filter(|record| !record.exited && !record.canvas_campbell && record.theme_notify && record.canvas_dark != dark)
+                .map(|record| {
+                    record.canvas_dark = dark;
+                    (record.channel.clone(), crate::terminal_theme::theme_change_report(dark).to_string())
+                })
+                .collect()
+        };
+        for (channel, report) in pending {
+            channel.write(report.as_bytes());
+        }
     }
 
     /// A side terminal on the local machine: the user's own shell.
@@ -400,7 +500,7 @@ impl TerminalHub {
     /// the record's `cwd` only has to stay stable across re-attaches of the same
     /// terminal id.
     pub fn create_remote_shell(&self, cwd: String, cols: u16, rows: u16, id: Option<String>, host: String) -> AppResult<String> {
-        let command = crate::ssh::remote_login_shell(&cwd);
+        let command = crate::ssh::remote_login_shell(&cwd, crate::terminal_theme::app_dark());
         self.create(cwd, cols, rows, id, Spawn::Remote { host, command }, false, None)
     }
 
@@ -427,25 +527,28 @@ impl TerminalHub {
             if record.exited { return false; }
             (record.channel.clone(), record.probe.clone())
         };
-        #[cfg(debug_assertions)]
         let started = Instant::now();
         let ok = channel.write(data.as_bytes());
-        #[cfg(debug_assertions)]
-        if crate::dev_tools::probes_enabled() {
-            let elapsed = started.elapsed().as_millis() as u64;
-            let mut probe = lock(&probe);
-            probe.writes += 1;
-            probe.last_write_ms = elapsed;
-            probe.last_write_bytes = data.len();
-            if data == "\x1b[I" {
-                probe.last_focus = Some("focused".into());
-            } else if data == "\x1b[O" {
-                probe.last_focus = Some("unfocused".into());
-            }
-            if ok { probe.write_ok += 1; } else { probe.write_err += 1; probe.last_error = Some("pty write failed".into()); }
+        let elapsed = started.elapsed().as_millis() as u64;
+        let mut probe = lock(&probe);
+        probe.writes += 1;
+        probe.last_write_ms = elapsed;
+        probe.last_write_bytes = data.len();
+        if data == "\x1b[I" {
+            probe.last_focus = Some("focused".into());
+        } else if data == "\x1b[O" {
+            probe.last_focus = Some("unfocused".into());
         }
-        #[cfg(not(debug_assertions))]
-        let _ = probe;
+        if ok {
+            probe.write_ok += 1;
+        } else {
+            probe.write_err += 1;
+            probe.last_error = Some("pty write failed".into());
+            crate::debuglog::warn_term("pty", id, "write failed");
+        }
+        if elapsed >= 200 {
+            crate::debuglog::warn_term("pty", id, &format!("write blocked {elapsed}ms"));
+        }
         ok
     }
 
@@ -456,24 +559,20 @@ impl TerminalHub {
             (record.channel.clone(), record.probe.clone())
         };
         let ok = channel.resize(cols, rows);
-        #[cfg(debug_assertions)]
-        if crate::dev_tools::probes_enabled() {
-            let size = channel.size();
-            let mut probe = lock(&probe);
-            probe.resize_count += 1;
-            probe.last_resize_cols = cols;
-            probe.last_resize_rows = rows;
-            probe.last_resize_ok = ok;
-            if let Some((cols, rows)) = size {
-                probe.ioctl_cols = Some(cols);
-                probe.ioctl_rows = Some(rows);
-            }
-            if !ok {
-                probe.last_error = Some("pty resize failed".into());
-            }
+        let size = channel.size();
+        let mut probe = lock(&probe);
+        probe.resize_count += 1;
+        probe.last_resize_cols = cols;
+        probe.last_resize_rows = rows;
+        probe.last_resize_ok = ok;
+        if let Some((cols, rows)) = size {
+            probe.ioctl_cols = Some(cols);
+            probe.ioctl_rows = Some(rows);
         }
-        #[cfg(not(debug_assertions))]
-        let _ = probe;
+        if !ok {
+            probe.last_error = Some("pty resize failed".into());
+            crate::debuglog::warn_term("pty", id, &format!("resize {cols}x{rows} failed"));
+        }
         ok
     }
 
@@ -484,11 +583,32 @@ impl TerminalHub {
         probe.backlog_bytes = record.backlog.len();
         probe.offset = record.offset;
         probe.listeners = record.listeners_tx.len();
+        probe.replay_dropped_bytes = record.replay_dropped_bytes;
+        probe.replay_trimmed = record.replay_trimmed;
         if let Some((cols, rows)) = record.channel.size() {
             probe.ioctl_cols = Some(cols);
             probe.ioctl_rows = Some(rows);
         }
         Some(probe)
+    }
+
+    /// Stamps the spawn -> first hook leg on the PTY probe.
+    ///
+    /// The PTY layer can never observe this itself: hooks arrive as files, not
+    /// as bytes, so the harness has to hand the moment back. First write wins —
+    /// a resumed card keeps its original number rather than resetting it on
+    /// every later hook.
+    pub fn record_first_hook(&self, id: &str, at_ms: i64) {
+        let map = self.lock();
+        let Some(record) = map.get(id) else { return };
+        let mut probe = lock(&record.probe);
+        if probe.first_hook_ms.is_some() {
+            return;
+        }
+        if let Some(spawned) = probe.spawned_at_ms {
+            probe.first_hook_ms = Some(at_ms.max(0) as u64)
+                .map(|at| at.saturating_sub(spawned));
+        }
     }
 
     pub fn kill(&self, id: &str) {
@@ -541,6 +661,24 @@ impl TerminalHub {
         }
     }
 
+    /// Attaches a listener and returns the catch-up payload.
+    ///
+    /// Three states, and the distinction matters because they are not
+    /// interchangeable to a client that is mid-stream:
+    ///
+    /// * `after` is inside `[start, offset]` — resumable. Replay exactly the tail
+    ///   the client has not seen; `reset` is false and nothing is lost. This is
+    ///   the normal reconnect after a pause, and it must survive arbitrarily long
+    ///   backgrounding, which is why the backlog is not the only source here.
+    /// * `after` is before `start` — the head was trimmed while the client was
+    ///   away. We cannot reconstruct the gap, so we replay the backlog and flag
+    ///   `dropped` so the loss is *visible* instead of silently swallowed.
+    /// * `after` is absent or beyond `offset` — first attach, or a cursor from a
+    ///   different session. Full replay, no loss attribution.
+    ///
+    /// A cursor *beyond* `offset` used to be indistinguishable from a stale one.
+    /// It is not: a client can legitimately hold a higher offset than we do after
+    /// a backend restart, and forcing a reset there discards its valid buffer.
     pub fn subscribe(&self, id: &str, after: Option<u64>) -> Option<(TerminalEvent, mpsc::UnboundedReceiver<TerminalEvent>, bool, Option<i32>)> {
         let mut map = self.lock();
         if let Some(record) = map.get_mut(id) {
@@ -549,19 +687,40 @@ impl TerminalHub {
             record.listeners = record.listeners_tx.len();
             record.last_listener = Instant::now();
             let start = record.offset.saturating_sub(record.backlog.len() as u64);
-            let reset = after.is_none() || after.is_some_and(|cursor| cursor < start || cursor > record.offset);
-            let (data, from) = if reset {
-                (record.backlog.clone(), start)
+            // Only a cursor that fell off the *front* forces a reset. A cursor
+            // ahead of us keeps the replay semantics and simply yields no new
+            // bytes, which `enqueueOutput` handles by skipping.
+            let trimmed = after.is_some_and(|cursor| cursor < start);
+            let ahead = after.is_some_and(|cursor| cursor > record.offset);
+            let reset = after.is_none() || trimmed || ahead;
+            let (data, from, dropped) = if reset {
+                if trimmed {
+                    // Bytes between the client's cursor and our oldest held byte
+                    // are gone for good. Report the size of the hole rather than
+                    // letting the client believe it is looking at a clean redraw.
+                    let cursor = after.unwrap_or(start);
+                    let lost = start.saturating_sub(cursor);
+                    crate::debuglog::warn_term(
+                        "sse",
+                        id,
+                        &format!("replay trimmed cursor={cursor} start={start} lost={lost}B"),
+                    );
+                    record.replay_trimmed += 1;
+                    record.replay_dropped_bytes = record.replay_dropped_bytes.saturating_add(lost);
+                    (record.backlog.clone(), start, Some(lost))
+                } else {
+                    (record.backlog.clone(), start, None)
+                }
             } else {
                 let skip = after.unwrap_or(start).saturating_sub(start) as usize;
                 let mut index = skip.min(record.backlog.len());
                 while index < record.backlog.len() && !record.backlog.is_char_boundary(index) {
                     index += 1;
                 }
-                (record.backlog[index..].to_string(), start + index as u64)
+                (record.backlog[index..].to_string(), start + index as u64, None)
             };
             return Some((
-                TerminalEvent::Output { data, from, offset: record.offset, reset: Some(reset) },
+                TerminalEvent::Output { data, from, offset: record.offset, reset: Some(reset), dropped },
                 rx,
                 record.exited,
                 record.exit_code,
@@ -576,6 +735,7 @@ impl TerminalHub {
                 from: 0,
                 offset: saved.output.len() as u64,
                 reset: Some(true),
+                dropped: None,
             },
             rx,
             true,
@@ -602,24 +762,37 @@ impl TerminalHub {
 /// Both transports funnel through here so the local pty thread and the SSH task
 /// cannot drift apart on backlog trimming, offset accounting or the dev probes.
 fn deliver(inner: &Mutex<HashMap<String, Record>>, id: &str, probe: &Arc<Mutex<PtyProbe>>, incoming: &[u8]) {
-    #[cfg(not(debug_assertions))]
-    let _ = probe;
     let (data, callback) = {
         let mut map = lock(inner);
         let Some(record) = map.get_mut(id) else { return };
         let data = decode_chunk(&mut record.pending, incoming);
-        #[cfg(debug_assertions)]
-        if crate::dev_tools::probes_enabled() {
+        // First real byte out of the CLI. Everything before this instant was the
+        // CLI booting; everything after it is the CLI working. Logged once per
+        // terminal so `pty spawn` -> `first byte` -> `starting->attention` line
+        // up in cue.log and each leg gets an owner instead of one 22s mystery.
+        {
             let mut probe = lock(probe);
             probe.chunks += 1;
             probe.bytes_in += incoming.len() as u64;
             if data.is_empty() {
                 probe.decode_held += 1;
+            } else if probe.first_byte_ms.is_none() {
+                let elapsed = probe
+                    .spawned_at_ms
+                    .map(|at| crate::queue::now_ms().max(0) as u64 - at)
+                    .unwrap_or(0);
+                probe.first_byte_ms = Some(elapsed);
+                crate::debuglog::info_term(
+                    "pty",
+                    id,
+                    &format!("first byte after {elapsed}ms ({} bytes)", incoming.len()),
+                );
             }
         }
         if data.is_empty() {
             return;
         }
+        record.theme_notify = crate::terminal_theme::observe_theme_notify(&data, record.theme_notify);
         record.backlog.push_str(&data);
         let from = record.offset;
         record.offset += data.len() as u64;
@@ -627,11 +800,9 @@ fn deliver(inner: &Mutex<HashMap<String, Record>>, id: &str, probe: &Arc<Mutex<P
         if record.persistent {
             record.dirty = true;
         }
-        #[cfg(debug_assertions)]
         let before = record.listeners_tx.len();
-        emit(record, TerminalEvent::Output { data: data.clone(), from, offset: record.offset, reset: None });
-        #[cfg(debug_assertions)]
-        if crate::dev_tools::probes_enabled() {
+        emit(record, TerminalEvent::Output { data: data.clone(), from, offset: record.offset, reset: None, dropped: None });
+        {
             let mut probe = lock(probe);
             probe.events_emitted += 1;
             probe.backlog_bytes = record.backlog.len();
@@ -639,24 +810,43 @@ fn deliver(inner: &Mutex<HashMap<String, Record>>, id: &str, probe: &Arc<Mutex<P
             probe.listeners = record.listeners_tx.len();
             if record.listeners_tx.len() < before {
                 probe.send_fail += (before - record.listeners_tx.len()) as u64;
+                if probe.send_fail == 1 {
+                    crate::debuglog::warn_term("sse", id, "listener dropped while bytes flowing");
+                }
             }
         }
         (data, record.on_output.clone())
     };
     if let Some(callback) = callback {
         if catch_unwind(AssertUnwindSafe(|| callback(&data))).is_err() {
-            #[cfg(debug_assertions)]
-            if crate::dev_tools::probes_enabled() {
-                let mut probe = lock(probe);
-                probe.on_output_panic += 1;
-                probe.last_error = Some("on_output panicked".into());
-            }
+            let mut probe = lock(probe);
+            probe.on_output_panic += 1;
+            probe.last_error = Some("on_output panicked".into());
+            crate::debuglog::error_term("pty", id, "on_output panicked");
         }
+    }
+}
+
+fn spawn_canvas_dark(spawn: &Spawn) -> bool {
+    match spawn {
+        Spawn::Local { env, .. } => env
+            .get("COLORFGBG")
+            .map(|value| crate::terminal_theme::is_dark_colorfgbg(value))
+            .unwrap_or_else(crate::terminal_theme::app_dark),
+        Spawn::Remote { command, .. } => command
+            .split("COLORFGBG=")
+            .nth(1)
+            .map(|rest| {
+                let value = rest.trim_start_matches('\'').split(['\'', ' ']).next().unwrap_or("");
+                crate::terminal_theme::is_dark_colorfgbg(value)
+            })
+            .unwrap_or_else(crate::terminal_theme::app_dark),
     }
 }
 
 fn finalize(inner: &Mutex<HashMap<String, Record>>, id: &str, code: i32, live: &LiveBus, probe: &Arc<Mutex<PtyProbe>>) {
     lock(probe).reader_alive = false;
+    crate::debuglog::info_term("pty", id, &format!("exit {code}"));
     let saved = {
         let mut map = lock(inner);
         map.get_mut(id).map(|record| {
@@ -796,7 +986,7 @@ mod tests {
         let hub = TerminalHub::new(LiveBus::new());
         let id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
         let probe = Arc::new(Mutex::new(PtyProbe { reader_alive: true, ..PtyProbe::default() }));
-        hub.register(id.to_string(), "/work".into(), false, None, Arc::new(NoopChannel), probe.clone());
+        hub.register(id.to_string(), "/work".into(), false, None, Arc::new(NoopChannel), probe.clone(), false, false);
         let bytes = "你好".as_bytes();
         deliver(&hub.inner, id, &probe, &bytes[..1]);
         assert_eq!(hub.snapshot(id).map(|s| s.output), Some(String::new()));
@@ -811,6 +1001,54 @@ mod tests {
         fn resize(&self, _cols: u16, _rows: u16) -> bool { false }
         fn size(&self) -> Option<(u16, u16)> { None }
         fn kill(&self) {}
+    }
+
+    struct CaptureChannel(Mutex<Vec<u8>>);
+
+    impl Channel for CaptureChannel {
+        fn write(&self, data: &[u8]) -> bool { lock(&self.0).extend_from_slice(data); true }
+        fn resize(&self, _cols: u16, _rows: u16) -> bool { false }
+        fn size(&self) -> Option<(u16, u16)> { None }
+        fn kill(&self) {}
+    }
+
+    #[test]
+    fn apply_canvas_dark_notifies_live_sessions() {
+        let hub = TerminalHub::new(LiveBus::new());
+        let id = "dddddddddddddddddddddddddddddddd";
+        let probe = Arc::new(Mutex::new(PtyProbe { reader_alive: true, ..PtyProbe::default() }));
+        let channel = Arc::new(CaptureChannel(Mutex::new(Vec::new())));
+        hub.register(id.to_string(), "/work".into(), false, None, channel.clone(), probe.clone(), false, false);
+        deliver(&hub.inner, id, &probe, b"\x1b[?2031h");
+        hub.apply_canvas_dark(true);
+        let report = String::from_utf8(lock(&channel.0).clone()).unwrap();
+        assert_eq!(report, "\x1b[?997;1n");
+        lock(&channel.0).clear();
+        hub.apply_canvas_dark(false);
+        assert_eq!(String::from_utf8(lock(&channel.0).clone()).unwrap(), "\x1b[?997;2n");
+    }
+
+    #[test]
+    fn a_cli_that_never_subscribed_2031_gets_no_theme_report() {
+        let hub = TerminalHub::new(LiveBus::new());
+        let id = "cccccccccccccccccccccccccccccc99";
+        let probe = Arc::new(Mutex::new(PtyProbe { reader_alive: true, ..PtyProbe::default() }));
+        let channel = Arc::new(CaptureChannel(Mutex::new(Vec::new())));
+        hub.register(id.to_string(), "/work".into(), false, None, channel.clone(), probe, false, false);
+        hub.apply_canvas_dark(true);
+        assert!(lock(&channel.0).is_empty(), "a 997 report without a DECSET 2031 subscription leaks onto the prompt");
+    }
+
+    #[test]
+    fn a_campbell_canvas_stays_pinned_to_dark() {
+        let hub = TerminalHub::new(LiveBus::new());
+        let id = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+        let probe = Arc::new(Mutex::new(PtyProbe { reader_alive: true, ..PtyProbe::default() }));
+        let channel = Arc::new(CaptureChannel(Mutex::new(Vec::new())));
+        hub.register(id.to_string(), "/work".into(), false, None, channel.clone(), probe.clone(), true, true);
+        deliver(&hub.inner, id, &probe, b"\x1b[?2031h");
+        hub.apply_canvas_dark(false);
+        assert!(lock(&channel.0).is_empty(), "a Campbell canvas does not follow the app theme");
     }
 
     /// The whole translation between the hub's synchronous write/resize/kill and

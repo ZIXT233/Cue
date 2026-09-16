@@ -28,3 +28,17 @@ src-tauri/target
 
 # WorkBuddy workspace data
 .workbuddy
+
+# Scratch files from local debugging runs
+/.probe.txt
+/.st.txt
+/.staged.txt
+/.bt.txt
+/.build-tail.txt
+/.chk.txt
+/.git-info.txt
+/.tsc.log
+/.build.log
+/.cargo-check.log
+/.cargo-test.log
+/.cargo-full.log

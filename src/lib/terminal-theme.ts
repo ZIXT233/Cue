@@ -7,6 +7,8 @@ export interface TerminalThemeHost {
   desktopPlatform?: string;
   platform?: string;
   userAgent?: string;
+  /** Inbox-ConPTY fallback: only then does the canvas stay Campbell. */
+  conptyFallback?: boolean;
 }
 
 // Original Solarized ANSI palette, shared by the light and dark variants.
@@ -47,8 +49,9 @@ export function campbellTerminalTheme(): ITheme {
   return { ...campbell };
 }
 
-// Native Windows ConPTY only. SSH and other platforms keep Solarized because
-// their PTY does not rewrite ANSI black into rgb(0,0,0).
+// Windows ConPTY fallback only. With the bundled modern ConPTY the canvas
+// follows the app theme like every other transport; SSH and other platforms
+// always do, because their PTY does not rewrite ANSI black into rgb(0,0,0).
 export function isWindowsConptyHost(host: TerminalThemeHost = {}): boolean {
   if (host.remote) return false;
   if (host.desktopPlatform) return host.desktopPlatform === "win32";
@@ -60,7 +63,8 @@ export function resolveTerminalThemeProfile(
   host: TerminalThemeHost = {},
 ): TerminalThemeProfile | undefined {
   if (explicit === "grok") return "grok";
-  return isWindowsConptyHost(host) ? "campbell" : explicit;
+  if (isWindowsConptyHost(host) && host.conptyFallback) return "campbell";
+  return explicit;
 }
 
 export function terminalThemeHostFromDocument(
@@ -73,10 +77,18 @@ export function terminalThemeHostFromDocument(
     desktopPlatform: root?.dataset.desktopPlatform,
     platform: nav?.platform,
     userAgent: nav?.userAgent,
+    conptyFallback: root?.dataset.conptyFallback === "true",
   };
 }
 
 // Match Grok's own dark canvas without rewriting ANSI colors emitted by the CLI.
+export function documentCanvasDark(root: Pick<HTMLElement, "classList" | "dataset">): boolean {
+  const background = root.dataset.terminalBg;
+  if (background === "light") return false;
+  if (background === "dark") return true;
+  return root.classList.contains("dark");
+}
+
 export function harnessTerminalTheme(dark: boolean, profile?: TerminalThemeProfile): ITheme {
   if (profile === "grok") {
     return { ...solarizedTerminalTheme(true), background: "#131313", foreground: "#d4d4d4",

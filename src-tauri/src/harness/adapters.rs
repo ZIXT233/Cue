@@ -38,6 +38,7 @@ pub fn adapter(id: &str) -> AppResult<Adapter> {
             ],
         },
         "claude" => Adapter { id: "claude", executable: "claude", args: &[] },
+        "codebuddy" => Adapter { id: "codebuddy", executable: "codebuddy", args: &[] },
         "cursor" => Adapter { id: "cursor", executable: "cursor-agent", args: &[] },
         "pi" => Adapter { id: "pi", executable: "pi", args: &[] },
         "omp" => Adapter { id: "omp", executable: "omp", args: &["--allow-home"] },

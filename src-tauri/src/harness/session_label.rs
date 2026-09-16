@@ -1,5 +1,6 @@
 use super::claude_session;
 use super::codex_session;
+use super::codebuddy_session;
 use super::cursor_session;
 use super::grok_session;
 use super::label_text::SessionLabel;
@@ -16,6 +17,7 @@ pub fn session_exists(kind: &str, session_id: &str) -> Option<bool> {
         "codex" => codex_session::codex_session_exists(session_id),
         "cursor" => Some(cursor_session::session_exists(session_id)),
         "claude" => Some(claude_session::session_exists(session_id)),
+        "codebuddy" => Some(codebuddy_session::session_exists(session_id)),
         "pi" => Some(pi_session::session_exists(session_id)),
         "omp" => Some(omp_session::session_exists(session_id)),
         "grok" => Some(grok_session::session_exists(session_id)),
@@ -31,6 +33,7 @@ pub fn read_session_label(kind: &str, session_id: &str, need_first_prompt: bool)
         "codex" => Some(codex_session::session_label(session_id, need_first_prompt)),
         "cursor" => Some(cursor_session::session_label(session_id)),
         "claude" => Some(claude_session::session_label(session_id)),
+        "codebuddy" => Some(codebuddy_session::session_label(session_id)),
         "pi" => Some(pi_session::session_label(session_id)),
         "omp" => Some(omp_session::session_label(session_id)),
         "grok" => Some(grok_session::session_label(session_id)),

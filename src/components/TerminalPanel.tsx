@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { harnessTerminalTheme, resolveTerminalThemeProfile, terminalThemeHostFromDocument, type TerminalThemeProfile } from "@/lib/terminal-theme";
+import { documentCanvasDark, harnessTerminalTheme, resolveTerminalThemeProfile, terminalThemeHostFromDocument, type TerminalThemeProfile } from "@/lib/terminal-theme";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { enhancedTerminalKey, decodeTerminalClipboard } from "@/lib/terminal-enhancements";
@@ -11,7 +11,7 @@ import { Terminal } from "@xterm/xterm";
 import { useI18n } from "@/hooks/useI18n";
 import { createTerminalWriter, isTerminalAbortError, terminalRequest } from "@/lib/terminal-client";
 import { setXtermProbe } from "@/lib/terminal-probe";
-import { developerProbesEnabled } from "@/lib/developer-probes";
+import { appLog } from "@/lib/app-log";
 import { MAX_ATTACHED_IMAGE_BYTES, MAX_ATTACHED_IMAGES } from "@/lib/image-attachments";
 import type { TerminalEvent } from "@/lib/terminal-manager";
 import type { TerminalTab } from "./terminal-tab-state";
@@ -35,6 +35,7 @@ interface Props {
   onClosed: () => void;
   onCloseError: () => void;
   onUnavailable?: () => void;
+  cardId?: string;
 }
 
 function liveThemeProfile(themeProfile: TerminalThemeProfile | undefined, remote: boolean | undefined): TerminalThemeProfile | undefined {
@@ -42,7 +43,55 @@ function liveThemeProfile(themeProfile: TerminalThemeProfile | undefined, remote
   return resolveTerminalThemeProfile(themeProfile, terminalThemeHostFromDocument(remote, document.documentElement, navigator));
 }
 
-export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, onUnavailable, embedded = false, readOnly = false, onStatusChange, onOutput, themeProfile, remote = false, focusReporting = false, inQueue = false, conptyCursorHide = true }: Props) {
+/// Terminal capability replies xterm generates for a probe the CLI sent.
+///
+/// These are answers, not keystrokes: they only exist because the CLI asked, and
+/// the CLI is expected to consume them off its own input. The ones seen in the
+/// wild do not — Cursor probes DA1 at startup and then echoes the `[?1;2c` it
+/// gets back onto its prompt as literal text. Withholding the reply is the
+/// correct fallback: the CLI drops through to `TERM` / `COLORFGBG`, which Cue
+/// already sets at spawn.
+///
+/// Deliberately exact-match rather than a prefix test. `ESC[A`..`ESC[D`, `ESC[H`,
+/// `ESC[F` and every other arrow/function key also start with `ESC[` and must
+/// keep flowing to the PTY.
+///
+/// The DECSET 2031 theme reports are *not* listed: those are pushed at the CLI by
+/// `apply_canvas_dark` when the app theme flips, not answers to a probe, so they
+/// still have to reach the PTY.
+const CAPABILITY_REPLIES = [
+  "\x1b[?1;2c",           // DA1 — the reply Cursor fails to consume
+  "\x1b[?6c",             // DA1 — linux console variant
+  "\x1b[>0;276;0c",       // DA2 — VT100, xterm build 276
+  "\x1b[>85;95;0c",       // DA2 — VT220-class
+  "\x1b[>83;40003;0c",    // DA2 — VT320-class
+  "\x1b[0n",              // DSR — device status OK
+  // Focus reporting is Cue's, not xterm's. The same two sequences mean different
+  // things: xterm emits them for browser textarea focus, while Cue means "this
+  // card is / is not in the queue" (see sendFocusReport). Two sources writing
+  // opposite meanings into one stream is worse than either alone, and the queue
+  // reading is the one the CLI actually acts on. `sendFocusReport` is therefore
+  // the only writer; these two constants silence xterm's half.
+  //
+  // No keystroke produces these bytes — xterm parses `CSI I` as CHT but never
+  // emits it, and Tab (`\x09`) / Shift+Tab (`\x1b[Z`) have their own encodings.
+  "\x1b[I",
+  "\x1b[O",
+];
+
+function isCapabilityReply(data: string): boolean {
+  return CAPABILITY_REPLIES.includes(data);
+}
+
+/// CPR (`ESC[<row>;<col>R`) is the one reply that carries live values, so it
+/// cannot be a constant. Matched narrowly: only the position-report form.
+const CPR_REPLY = /^\x1b\[\??\d+;\d+R$/;
+
+function isCapabilityReplyOrReport(data: string): boolean {
+  return isCapabilityReply(data) || CPR_REPLY.test(data);
+}
+
+export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, onUnavailable, embedded = false, readOnly = false, onStatusChange, onOutput, themeProfile, remote = false, focusReporting = false, inQueue = false, conptyCursorHide = true, cardId }: Props) {
   const { t } = useI18n();
   const { id, cwd, sshHost, restored } = tab;
   const containerRef = useRef<HTMLDivElement>(null);
@@ -59,6 +108,9 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
   inQueueRef.current = inQueue;
   const conptyCursorHideRef = useRef(conptyCursorHide);
   conptyCursorHideRef.current = conptyCursorHide;
+  // The only writer of focus reports. xterm's own half is filtered out of
+  // `sendInput` because it reports browser textarea focus, which is not what the
+  // CLI is asking about — the queue position is.
   const sendFocusReport = useCallback((inQueueNow: boolean) => {
     if (!focusReportingRef.current || !focusArmedRef.current) return;
     writerRef.current?.write(inQueueNow ? "\x1b[I" : "\x1b[O");
@@ -115,7 +167,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
     const conptyHost = !remote && typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
     let conptyCursorHidden = false;
     let conptyRevealTimer: ReturnType<typeof setTimeout> | undefined;
-    const liveTheme = () => harnessTerminalTheme(document.documentElement.classList.contains("dark"), liveThemeProfile(themeProfile, remote));
+    const liveTheme = () => harnessTerminalTheme(documentCanvasDark(document.documentElement), liveThemeProfile(themeProfile, remote));
     // Follow the settings font slider 1:1 (chat baseline 14px ↔ terminal 13px),
     // so one control scales both surfaces.
     const liveFontSize = () => {
@@ -148,7 +200,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
         fit.fit();
       }
     });
-    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme", "data-desktop-platform", "style"] });
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme", "data-desktop-platform", "data-terminal-bg", "style"] });
     terminalRef.current = terminal;
     const fit = new FitAddon();
     terminal.loadAddon(fit);
@@ -224,7 +276,13 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       if (data && connected && !exited && !inputFailed && !sessionReadOnly) writer.write(data);
     };
     const sendInput = (data: string) => {
-      if (!connected || exited || inputFailed || sessionReadOnly || terminal.options.disableStdin) return;
+      if (exited || inputFailed || sessionReadOnly) return;
+      // xterm answers terminal probes on this same channel, but the CLIs that
+      // probe (Cursor asks for DA1 on every launch) do not consume the answer —
+      // they echo it onto their prompt as literal text. Drop it instead: without
+      // a reply they fall back to TERM / COLORFGBG, which the spawn env carries.
+      if (isCapabilityReplyOrReport(data)) return;
+      if (!connected || terminal.options.disableStdin) return;
       if (!conptyHost) { writer.write(data); return; }
       // One HTTP POST per animation frame instead of one per keystroke.
       pendingInput += data;
@@ -313,12 +371,15 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
     let bytesWritten = 0;
     let skipped = 0;
     let gaps = 0;
+    // Bytes the server confirmed are unrecoverable. Kept apart from `gaps`:
+    // a gap triggers a resync that can still repair the stream, a drop is data
+    // that is simply gone, and conflating them hides real loss behind retries.
+    let dropped = 0;
     let lastReset = false;
     let resyncing = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let reconnectAttempt = 0;
     const publishProbe = (statusName: string) => {
-      if (!developerProbesEnabled()) return;
       setXtermProbe(id, {
         cols: terminal.cols,
         rows: terminal.rows,
@@ -327,7 +388,8 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
         lastOffset: offset,
         lastReset,
         gaps,
-        status: `${statusName}${skipped ? ` skip=${skipped}` : ""}${gaps ? ` gaps=${gaps}` : ""}`,
+        dropped,
+        status: `${statusName}${skipped ? ` skip=${skipped}` : ""}${gaps ? ` gaps=${gaps}` : ""}${dropped ? ` dropped=${dropped}B` : ""}`,
       });
     };
     // Native EventSource retry would reuse the URL captured at connect time,
@@ -364,6 +426,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       clearTimeout(reconnectTimer);
       events?.close();
       events = null;
+      appLog("debug", "sse", "pause", { card: cardId, term: id });
       setStatus((current) => current === "connecting" || current === "ready" ? "paused" : current);
     };
     liveControlRef.current = setLive;
@@ -388,6 +451,13 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
     const connect = () => {
       if (disposed || exited || !live || !navigator.onLine) return;
       events?.close();
+      // Always hand the server the offset we actually hold. Omitting it when
+      // `offset === undefined` is correct (nothing read yet, full replay is what
+      // we want), but once we have an offset it must ride along on *every*
+      // reconnect — the browser drops its internal lastEventId when we close the
+      // stream, so `?after=` is the only cursor the server can trust. Without it
+      // a resume after a pause degrades into a reset that replays just the
+      // backlog, and anything trimmed in the meantime is lost with no signal.
       events = new EventSource(`/api/terminal/${encodeURIComponent(id)}/events${offset === undefined ? "" : `?after=${offset}`}`);
       events.onmessage = (message) => {
         const event = JSON.parse(message.data) as TerminalEvent;
@@ -399,6 +469,12 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
             // first attach). Wipe and redraw instead of splicing.
             lastReset = true;
             resyncing = false;
+            if (typeof event.dropped === "number" && event.dropped > 0) {
+              // The redraw is not a superset of what we had — bytes are gone for
+              // good. Say so; a silent wipe reads as "nothing happened".
+              dropped += event.dropped;
+              appLog("warn", "sse", `replay lost ${event.dropped}B cursor=${offset ?? "none"}`, { card: cardId, term: id });
+            }
             enqueueOutput(event);
             return;
           }
@@ -414,6 +490,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
             gaps += 1;
             if (!resyncing) {
               resyncing = true;
+              appLog("warn", "sse", `gap resync from=${from} have=${offset} got=${event.offset}`, { card: cardId, term: id });
               publishProbe("resync");
               scheduleReconnect();
             }
@@ -445,6 +522,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
         if (disposed || exited) return;
         connected = false;
         terminal.options.disableStdin = true;
+        appLog("warn", "sse", `error after=${offset ?? "none"} attempt=${reconnectAttempt}`, { card: cardId, term: id });
         setStatus("connecting");
         scheduleReconnect();
       };
@@ -460,7 +538,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
         await terminalRequest("/api/terminal", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id, cwd, cols: terminal.cols, rows: terminal.rows, ...(sshHost ? { sshHost } : {}) }),
+          body: JSON.stringify({ id, cwd, cols: terminal.cols, rows: terminal.rows, ...(sshHost ? { sshHost } : {}), ...(cardId ? { cardId } : {}) }),
         });
       }
       connect();

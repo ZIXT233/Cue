@@ -1,5 +1,8 @@
 export type TerminalEvent =
-  | { type: "output"; data: string; from?: number; offset: number; reset?: boolean }
+  // `dropped` is only present when the server had to replay from a point later
+  // than our cursor: that many bytes are gone and cannot be recovered. Absent
+  // means either a lossless resume or a first attach — see `reset`.
+  | { type: "output"; data: string; from?: number; offset: number; reset?: boolean; dropped?: number }
   | { type: "exit"; exitCode: number }
   | { type: "closed" };
 

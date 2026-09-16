@@ -14,6 +14,11 @@ pub struct HookSignal {
     pub first_prompt: Option<String>,
     pub title: Option<String>,
     pub notification: Option<String>,
+    /// Cold-start workspace reported by a global (non-Cue) hook.
+    pub workspace_root: Option<String>,
+    /// Set by the ingress when the emitting process carried no Cue channel: the event
+    /// belongs to an external session, not to a queue card.
+    pub external: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -41,6 +46,18 @@ pub struct ProbeState {
     pub identity_at: Option<i64>,
     pub session_id_prefix: Option<String>,
     pub source: Option<String>,
+    /// Wall-clock ms when this terminal's *first* hook signal was ingested.
+    ///
+    /// Together with the PTY probe's `spawned_at_ms` this splits a slow card in
+    /// two: `first_hook - spawn` is the second leg (how long the CLI took to
+    /// reach its first hook), and comparing it against the CLI's own
+    /// `first_byte_ms` tells us whether the cost sat in bootstrap or after it.
+    /// First write wins; later hooks never move it.
+    pub first_hook_at_ms: Option<i64>,
+    /// The terminal's spawn instant, copied in at launch. Kept here (not only on
+    /// the PTY probe) so the signal path can compute its own deltas without
+    /// reaching across into the terminal module's lock.
+    pub spawned_at_ms: Option<i64>,
 }
 
 pub fn normalize_event(event: &str) -> &str {
@@ -64,10 +81,12 @@ pub fn hook_state(signal: &HookSignal) -> Option<&'static str> {
         return Some("attention");
     }
     if event == "PermissionRequest" { return Some("attention"); }
-    let tool = signal.tool.as_deref().unwrap_or("");
-    if regex::Regex::new(r"(^|[/.])(request_user_input|ask_user_question|AskUserQuestion)$").unwrap().is_match(tool)
-        && ["PreToolUse", "BeforeTool", "preToolUse"].contains(&signal.event.as_str())
-    {
+    if signal.kind.as_deref() == Some("antigravity") && signal.event == "PreToolUse" {
+        return Some("attention");
+    }
+    // Cursor gates tool execution behind a permission prompt; preToolUse fires right
+    // before it for every tool (matcher "*"), so the whole event is the ask moment.
+    if signal.kind.as_deref() == Some("cursor") && signal.event == "preToolUse" {
         return Some("attention");
     }
     if event == "UserPromptSubmit" { return Some("working"); }
@@ -128,13 +147,12 @@ pub fn observe_hook(current: ProbeState, raw: HookSignal) -> ProbeState {
     next
 }
 
-pub fn observe_title(current: ProbeState, state: &str, at: i64, hooks_authoritative: bool) -> ProbeState {
+/// Last writer wins: any source that reports a state change updates the card.
+/// A missed transition (hook lost to a timeout, CLI aborting a turn without a
+/// Stop) leaves the card stuck far longer than a flapped state does, so the
+/// title probe is never demoted — even when hooks have been seen.
+pub fn observe_title(current: ProbeState, state: &str, at: i64) -> ProbeState {
     let mut next = current;
-    if hooks_authoritative && next.hook_seen {
-        next.title_seen = true;
-        next.title_state = Some(state.into());
-        return next;
-    }
     if next.title_state.as_deref() == Some(state) {
         next.title_seen = true;
         return next;
@@ -150,6 +168,38 @@ pub fn observe_title(current: ProbeState, state: &str, at: i64, hooks_authoritat
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Claude-family `PreToolUse` means "the tool is running", so a CodeBuddy tool
+    /// call stays "working"; only a bare turn end, or a prompt notification, waits
+    /// on the user. Notification is what a blocked ask actually arrives through.
+    #[test]
+    fn codebuddy_tools_are_working_and_prompts_are_attention() {
+        let edit = HookSignal {
+            kind: Some("codebuddy".into()),
+            event: "PreToolUse".into(),
+            tool: Some("Explain".into()),
+            at: 1,
+            ..HookSignal::default()
+        };
+        assert_eq!(hook_state(&edit), Some("working"));
+
+        let stop = HookSignal {
+            kind: Some("codebuddy".into()),
+            event: "Stop".into(),
+            at: 2,
+            ..HookSignal::default()
+        };
+        assert_eq!(hook_state(&stop), Some("attention"));
+
+        let blocked = HookSignal {
+            kind: Some("codebuddy".into()),
+            event: "Notification".into(),
+            notification: Some("permission_prompt".into()),
+            at: 3,
+            ..HookSignal::default()
+        };
+        assert_eq!(hook_state(&blocked), Some("attention"));
+    }
 
     #[test]
     fn last_submit_prompt_wins() {
@@ -235,16 +285,78 @@ mod tests {
     }
 
     #[test]
-    fn title_is_fallback_after_hooks() {
+    fn antigravity_pre_tool_use_is_attention() {
+        let next = observe_hook(ProbeState {
+            kind: Some("antigravity".into()),
+            state: "working".into(),
+            ..ProbeState::default()
+        }, HookSignal {
+            kind: Some("antigravity".into()),
+            event: "PreToolUse".into(),
+            at: 2,
+            tool: Some("run_command".into()),
+            ..HookSignal::default()
+        });
+        assert_eq!(next.state, "attention");
+        let after = observe_hook(next, HookSignal {
+            kind: Some("antigravity".into()),
+            event: "PostToolUse".into(),
+            at: 3,
+            tool: Some("run_command".into()),
+            ..HookSignal::default()
+        });
+        assert_eq!(after.state, "working");
+    }
+
+    #[test]
+    fn cursor_pre_tool_use_is_attention() {
+        let next = observe_hook(ProbeState {
+            kind: Some("cursor".into()),
+            state: "working".into(),
+            ..ProbeState::default()
+        }, HookSignal {
+            kind: Some("cursor".into()),
+            event: "preToolUse".into(),
+            at: 2,
+            tool: Some("Shell".into()),
+            ..HookSignal::default()
+        });
+        assert_eq!(next.state, "attention");
+        let after = observe_hook(next, HookSignal {
+            kind: Some("cursor".into()),
+            event: "postToolUse".into(),
+            at: 3,
+            tool: Some("Shell".into()),
+            ..HookSignal::default()
+        });
+        assert_eq!(after.state, "working");
+    }
+
+    #[test]
+    fn title_wins_even_after_hooks() {
         let current = ProbeState {
             state: "attention".into(),
             hook_seen: true,
             source: Some("hook".into()),
             ..ProbeState::default()
         };
-        let next = observe_title(current, "working", 10, true);
-        assert_eq!(next.state, "attention");
+        let next = observe_title(current, "working", 10);
+        assert_eq!(next.state, "working");
         assert_eq!(next.title_state.as_deref(), Some("working"));
-        assert_eq!(next.source.as_deref(), Some("hook"));
+        assert_eq!(next.source.as_deref(), Some("title"));
+    }
+
+    #[test]
+    fn title_exit_from_working_recovers_a_lost_stop_hook() {
+        // The codex card stuck in "working": the Stop hook never arrived, only
+        // the title probe saw the turn end. The title must still flip the card.
+        let current = ProbeState {
+            state: "working".into(),
+            hook_seen: true,
+            source: Some("hook".into()),
+            ..ProbeState::default()
+        };
+        let next = observe_title(current, "attention", 10);
+        assert_eq!(next.state, "attention");
     }
 }

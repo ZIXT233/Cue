@@ -359,14 +359,14 @@ async fn connect(target: &Target, password: Option<String>, accept: Option<Strin
     let opened = tokio::time::timeout(CONNECT_TIMEOUT, client::connect(config, (target.hostname.as_str(), target.port), handler)).await;
     let handle = match opened {
         Err(_) => {
-            crate::debuglog::log(&format!("remote: connect to {} TIMED OUT after {}s (TCP+key exchange)", target.label(), CONNECT_TIMEOUT.as_secs()));
+            crate::debuglog::error("ssh", &format!("connect {} timed out after {}s", target.label(), CONNECT_TIMEOUT.as_secs()));
             return Err(AppError::machine("TIMEOUT"));
         }
         Ok(Err(error)) => {
             // Log the raw russh error text first: it is the most precise signal
             // of what actually failed on the wire, before classification.
-            crate::debuglog::log(&format!(
-                "remote: connect to {} FAILED after {}ms: {error:?} | {error}",
+            crate::debuglog::error("ssh", &format!(
+                "connect {} failed after {}ms: {error}",
                 target.label(),
                 started.elapsed().as_millis()
             ));
@@ -375,7 +375,7 @@ async fn connect(target: &Target, password: Option<String>, accept: Option<Strin
             return Err(error);
         }
         Ok(Ok(handle)) => {
-            crate::debuglog::log(&format!("remote: connected to {} in {}ms, authenticating", target.label(), started.elapsed().as_millis()));
+            crate::debuglog::info("ssh", &format!("connected {} in {}ms", target.label(), started.elapsed().as_millis()));
             handle
         }
     };
@@ -383,17 +383,17 @@ async fn connect(target: &Target, password: Option<String>, accept: Option<Strin
     let auth_started = std::time::Instant::now();
     match tokio::time::timeout(AUTH_TIMEOUT, authenticate(&session, target, password.as_deref())).await {
         Ok(Ok(())) => {
-            crate::debuglog::log(&format!("remote: authenticated {} in {}ms", target.label(), auth_started.elapsed().as_millis()));
+            crate::debuglog::info("ssh", &format!("auth ok {} in {}ms", target.label(), auth_started.elapsed().as_millis()));
             Ok(session)
         }
         Ok(Err(error)) => {
-            crate::debuglog::log(&format!("remote: authentication for {} failed after {}ms", target.label(), auth_started.elapsed().as_millis()));
+            crate::debuglog::error("ssh", &format!("auth failed {} after {}ms", target.label(), auth_started.elapsed().as_millis()));
             crate::debuglog::log_error("remote auth", &error);
             session.disconnect().await;
             Err(error)
         }
         Err(_) => {
-            crate::debuglog::log(&format!("remote: authentication for {} TIMED OUT after {}s", target.label(), AUTH_TIMEOUT.as_secs()));
+            crate::debuglog::error("ssh", &format!("auth timed out {} after {}s", target.label(), AUTH_TIMEOUT.as_secs()));
             session.disconnect().await;
             Err(AppError::machine("TIMEOUT"))
         }
@@ -697,7 +697,7 @@ where
     let channel = {
         let guard = session.handle.lock().await;
         guard.channel_open_session().await.map_err(|error| {
-            crate::debuglog::log(&format!("remote pty: channel_open_session failed on {}: {error}", target.label()));
+            crate::debuglog::error("pty", &format!("channel_open_session failed on {}: {error}", target.label()));
             AppError::msg(error.to_string())
         })?
     };
@@ -706,11 +706,11 @@ where
         .request_pty(true, "xterm-256color", cols as u32, rows as u32, 0, 0, &[])
         .await
         .map_err(|error| {
-            crate::debuglog::log(&format!("remote pty: request_pty failed on {}: {error}", target.label()));
+            crate::debuglog::error("pty", &format!("request_pty failed on {}: {error}", target.label()));
             AppError::msg(error.to_string())
         })?;
     writer.exec(true, command.to_string()).await.map_err(|error| {
-        crate::debuglog::log(&format!("remote pty: exec request failed on {}: {error}", target.label()));
+        crate::debuglog::error("pty", &format!("exec request failed on {}: {error}", target.label()));
         AppError::msg(error.to_string())
     })?;
     crate::debuglog::log(&format!("remote pty: running on {} at {cols}x{rows}: {}", target.label(), crate::debuglog::clip(command, 200)));
@@ -721,17 +721,17 @@ where
         tokio::select! {
             message = reader.wait() => match message {
                 Some(ChannelMsg::Data { data }) => {
-                    crate::debuglog::log(&format!("remote pty <- {}B: {}", data.len(), hex_prefix(&data, 48)));
+                    crate::debuglog::trace("pty", &format!("remote <- {}B: {}", data.len(), hex_prefix(&data, 48)));
                     sink(data.to_vec());
                 }
                 // A pty normally folds stderr into stdout; an exec channel does
                 // not. Either way both are terminal output.
                 Some(ChannelMsg::ExtendedData { data, .. }) => {
-                    crate::debuglog::log(&format!("remote pty <- (ext) {}B: {}", data.len(), hex_prefix(&data, 48)));
+                    crate::debuglog::trace("pty", &format!("remote <- ext {}B: {}", data.len(), hex_prefix(&data, 48)));
                     sink(data.to_vec());
                 }
                 Some(ChannelMsg::ExitStatus { exit_status }) => {
-                    crate::debuglog::log(&format!("remote pty: exit status {exit_status}"));
+                    crate::debuglog::debug("pty", &format!("remote exit status {exit_status}"));
                     exit_code = Some(exit_status as i32);
                 }
                 Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => break,
@@ -739,7 +739,7 @@ where
             },
             command = commands.recv() => match command {
                 Some(PtyCommand::Data(bytes)) => {
-                    crate::debuglog::log(&format!("remote pty -> {}B: {}", bytes.len(), hex_prefix(&bytes, 48)));
+                    crate::debuglog::trace("pty", &format!("remote -> {}B: {}", bytes.len(), hex_prefix(&bytes, 48)));
                     if writer.data_bytes(bytes).await.is_err() {
                         end_reason = "write failed (channel gone)";
                         break;
@@ -762,7 +762,7 @@ where
             },
         }
     }
-    crate::debuglog::log(&format!("remote pty: ended ({end_reason}), exit_code={:?}", exit_code));
+    crate::debuglog::info("pty", &format!("remote ended ({end_reason}) exit={:?}", exit_code));
     Ok(exit_code.unwrap_or(0))
 }
 
@@ -1099,7 +1099,7 @@ mod tests {
         // The command is the user's login shell in the workspace directory, and
         // the size the pane asked for is the size the remote pty got — this is
         // the whole reason for not going through a local ConPTY.
-        assert!(recorded.lock().commands.iter().any(|command| command == &crate::ssh::remote_login_shell("/srv/app")));
+        assert!(recorded.lock().commands.iter().any(|command| command == &crate::ssh::remote_login_shell("/srv/app", crate::terminal_theme::app_dark())));
         assert_eq!(recorded.lock().pty, Some(("xterm-256color".into(), 132, 43)));
 
         assert!(hub.write(side, "echo hi\n"), "keystrokes reach the channel");
