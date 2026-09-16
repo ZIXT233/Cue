@@ -20,8 +20,9 @@ import {
   CHAT_CONTENT_FONT_SIZE_MIN,
   useChatAppearance,
 } from "@/hooks/useChatAppearance";
-import { setLastSettingsSection, type SettingsSection } from "@/lib/settings-navigation";
+import { setLastSettingsSection, SETTINGS_SECTION_VALUES, type SettingsSection } from "@/lib/settings-navigation";
 import { RemoteHostsSettings } from "./RemoteHostsSettings";
+import { ExternalSessionsSettings } from "./ExternalSessionsSettings";
 import { ConfigButton, ConfigSwitch } from "./SettingsUi";
 import { saveAndOpenAppLog } from "@/lib/card-log";
 import { invoke } from "@tauri-apps/api/core";
@@ -51,6 +52,15 @@ export function SettingsSectionIcon({ section, size = 16, strokeWidth = 1.8 }: {
     className: "settings-section-icon",
   };
   if (section === "remote-hosts") return <svg {...common}><rect x="4" y="3" width="16" height="7" rx="2" /><rect x="4" y="14" width="16" height="7" rx="2" /><path d="M8 6h.01M8 17h.01M12 6h5M12 17h5" /></svg>;
+  if (section === "external-sessions") {
+    return (
+      <svg {...common}>
+        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+        <polyline points="15 3 21 3 21 9" />
+        <line x1="10" y1="14" x2="21" y2="3" />
+      </svg>
+    );
+  }
   return <svg {...common}><path d="M20 7h-9M14 17H5" /><circle cx="7" cy="7" r="3" /><circle cx="17" cy="17" r="3" /></svg>;
 }
 
@@ -284,10 +294,13 @@ function GeneralSettings() {
 
 export function SettingsPanel({ initialSection, onClose }: Props) {
   const { t } = useI18n();
-  const [section, setSection] = useState<SettingsSection>(initialSection === "general" || initialSection === "remote-hosts" ? initialSection : "general");
+  const [section, setSection] = useState<SettingsSection>(
+    SETTINGS_SECTION_VALUES.includes(initialSection as SettingsSection) ? initialSection : "general"
+  );
   const [mountedSections, setMountedSections] = useState<ReadonlySet<SettingsSection>>(() => new Set([section]));
   const sections: { id: SettingsSection; label: string }[] = [
     { id: "general", label: t("settings.general") },
+    { id: "external-sessions", label: t("settings.externalSessions") },
     { id: "remote-hosts", label: t("machines.settings") },
   ];
 
@@ -310,7 +323,7 @@ export function SettingsPanel({ initialSection, onClose }: Props) {
   };
 
   const sectionHost = (id: SettingsSection, content: ReactNode) => mountedSections.has(id) ? (
-    <div key={id} hidden={section !== id} className={`settings-section-host${id === "general" ? " is-general" : ""}`}>
+    <div key={id} hidden={section !== id} className={`settings-section-host${id === "general" || id === "external-sessions" ? " is-general" : ""}`}>
       {content}
     </div>
   ) : null;
@@ -343,6 +356,7 @@ export function SettingsPanel({ initialSection, onClose }: Props) {
         </div>
         <main className="settings-dialog-main">
           {sectionHost("remote-hosts", <RemoteHostsSettings />)}
+          {sectionHost("external-sessions", <ExternalSessionsSettings />)}
           {sectionHost("general", <GeneralSettings />)}
         </main>
       </div>

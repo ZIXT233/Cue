@@ -105,6 +105,16 @@ pub struct HarnessSession {
     pub probe: Option<String>,
 }
 
+/// One message of an external session's own record, so a card can show the exchange
+/// instead of only that the session is waiting.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalTurn {
+    /// "user" or "assistant".
+    pub role: String,
+    pub text: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalNotice {
@@ -117,8 +127,21 @@ pub struct ExternalNotice {
     /// Last path segment of the workspace the external session is working in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
-    /// Always "attention": the notice exists only while the session wants a human.
+    /// Full workspace directory, so the card can name the folder it is really in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    /// Real session title from the provider's own store, when it can be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_name: Option<String>,
+    /// Latest user prompt, i.e. the ask whose turn just ended.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    /// Tail of the conversation, oldest first. Empty when only the hook reported it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub turns: Vec<ExternalTurn>,
+    /// "attention" while the session wants a human, "working" while it has the floor.
     pub state: String,
+    /// The reply itself: a notice has no terminal, so this is the card's content.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -262,12 +285,39 @@ fn default_developer_probes() -> bool {
     false
 }
 
+fn default_external_ingress() -> std::collections::HashMap<String, bool> {
+    let mut map = std::collections::HashMap::new();
+    map.insert("codex".into(), true);
+    map.insert("cursor".into(), true);
+    map.insert("antigravity".into(), true);
+    map.insert("grok".into(), true);
+    map.insert("claude".into(), true);
+    map.insert("opencode".into(), true);
+    map.insert("codebuddy".into(), true);
+    map.insert("pi".into(), true);
+    map
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     #[serde(default = "default_powershell")]
     pub powershell_enabled: bool,
     #[serde(default = "default_developer_probes", alias = "developerProbes")]
     pub developer_probes: bool,
+    #[serde(default = "default_external_ingress", alias = "externalIngress")]
+    pub external_ingress: std::collections::HashMap<String, bool>,
+}
+
+impl AppSettings {
+    pub fn is_external_ingress_enabled(&self, harness: &str) -> bool {
+        // "gemini" is an alias for "antigravity", "omp" is an alias for "pi"
+        let key = match harness {
+            "gemini" => "antigravity",
+            "omp" => "pi",
+            other => other,
+        };
+        self.external_ingress.get(key).copied().unwrap_or(true)
+    }
 }
 
 impl Default for AppSettings {
@@ -275,6 +325,7 @@ impl Default for AppSettings {
         Self {
             powershell_enabled: default_powershell(),
             developer_probes: default_developer_probes(),
+            external_ingress: default_external_ingress(),
         }
     }
 }
@@ -324,5 +375,13 @@ mod tests {
         assert!(on.developer_probes);
         let camel: AppSettings = serde_json::from_str(r#"{"developerProbes":true}"#).unwrap();
         assert!(camel.developer_probes);
+        assert!(missing.is_external_ingress_enabled("codex"));
+        assert!(missing.is_external_ingress_enabled("cursor"));
+        assert!(missing.is_external_ingress_enabled("antigravity"));
+        assert!(missing.is_external_ingress_enabled("gemini"));
+
+        let disabled: AppSettings = serde_json::from_str(r#"{"external_ingress":{"codex":false}}"#).unwrap();
+        assert!(!disabled.is_external_ingress_enabled("codex"));
+        assert!(disabled.is_external_ingress_enabled("cursor"));
     }
 }

@@ -15,6 +15,7 @@ import { appLog } from "@/lib/app-log";
 import { MAX_ATTACHED_IMAGE_BYTES, MAX_ATTACHED_IMAGES } from "@/lib/image-attachments";
 import type { TerminalEvent } from "@/lib/terminal-manager";
 import type { TerminalTab } from "./terminal-tab-state";
+import { TerminalStartupProgress, type TerminalStartupStage } from "./TerminalStartupProgress";
 
 export type TerminalConnectionStatus = "connecting" | "ready" | "exited" | "error" | "paused";
 interface Props {
@@ -36,6 +37,9 @@ interface Props {
   onCloseError: () => void;
   onUnavailable?: () => void;
   cardId?: string;
+  harnessKind?: string;
+  harnessName?: string;
+  isStarting?: boolean;
 }
 
 function liveThemeProfile(themeProfile: TerminalThemeProfile | undefined, remote: boolean | undefined): TerminalThemeProfile | undefined {
@@ -91,9 +95,14 @@ function isCapabilityReplyOrReport(data: string): boolean {
   return isCapabilityReply(data) || CPR_REPLY.test(data);
 }
 
-export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, onUnavailable, embedded = false, readOnly = false, onStatusChange, onOutput, themeProfile, remote = false, focusReporting = false, inQueue = false, conptyCursorHide = true, cardId }: Props) {
+export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, onUnavailable, embedded = false, readOnly = false, onStatusChange, onOutput, themeProfile, remote = false, focusReporting = false, inQueue = false, conptyCursorHide = true, cardId, harnessKind, harnessName, isStarting }: Props) {
   const { t } = useI18n();
   const { id, cwd, sshHost, restored } = tab;
+  const initialNeedsStartup = Boolean(isStarting || !restored);
+  const [startupStage, setStartupStage] = useState<TerminalStartupStage>(initialNeedsStartup ? "preparing" : "ready");
+  const [showProgress, setShowProgress] = useState<boolean>(initialNeedsStartup);
+  const hasOutputRef = useRef(!initialNeedsStartup);
+  const startTimeRef = useRef(Date.now());
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const startRef = useRef<Promise<void>>(Promise.resolve());
@@ -163,6 +172,17 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
     setStatus("connecting");
     setError(null);
     setExitCode(null);
+
+    const isExplicitRestart = reconnectKey > 0;
+    if (initialNeedsStartup || isExplicitRestart) {
+      hasOutputRef.current = false;
+      setStartupStage("preparing");
+      setShowProgress(true);
+      startTimeRef.current = Date.now();
+    } else {
+      hasOutputRef.current = true;
+      setShowProgress(false);
+    }
 
     const conptyHost = !remote && typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
     let conptyCursorHidden = false;
@@ -438,6 +458,10 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       }
       if (event.data.includes("\x1b[?1004l")) focusArmedRef.current = false;
       bytesWritten += event.data.length;
+      if (event.data.length > 0 && !hasOutputRef.current) {
+        hasOutputRef.current = true;
+        setStartupStage("ready");
+      }
       outputQueue = outputQueue.then(() => new Promise<void>((resolve) => {
         if (disposed) { resolve(); return; }
         replaying = event.reset === true;
@@ -513,6 +537,9 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
         if (inputFailed) return;
         terminal.options.disableStdin = sessionReadOnly;
         setStatus("ready");
+        if (!hasOutputRef.current) {
+          setStartupStage("waiting_output");
+        }
         fitAndResize();
         if (!sessionReadOnly) writer.resize(terminal.cols, terminal.rows);
         if (container.offsetWidth && container.offsetHeight) terminal.focus();
@@ -524,6 +551,9 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
         terminal.options.disableStdin = true;
         appLog("warn", "sse", `error after=${offset ?? "none"} attempt=${reconnectAttempt}`, { card: cardId, term: id });
         setStatus("connecting");
+        if (!hasOutputRef.current && reconnectAttempt >= 2) {
+          setStartupStage("error");
+        }
         scheduleReconnect();
       };
     };
@@ -541,6 +571,9 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
           body: JSON.stringify({ id, cwd, cols: terminal.cols, rows: terminal.rows, ...(sshHost ? { sshHost } : {}), ...(cardId ? { cardId } : {}) }),
         });
       }
+      if (!disposed && !hasOutputRef.current) {
+        setStartupStage("connecting");
+      }
       connect();
     })().catch((reason: Error) => {
       if (disposed || isTerminalAbortError(reason)) return;
@@ -550,6 +583,10 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       }
       setError(reason.message);
       setStatus("error");
+      if (!hasOutputRef.current) {
+        setStartupStage("error");
+        setShowProgress(true);
+      }
     });
 
     const pageHide = () => {
@@ -677,6 +714,18 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
         <button type="button" aria-label={t("files.cancel")} onClick={closeSearch}>×</button>
       </div>}
       {dragging && <div className="terminal-drop-hint">{t("terminal.dropFiles")}</div>}
+      {showProgress && (
+        <TerminalStartupProgress
+          stage={startupStage}
+          remote={remote}
+          sshHost={sshHost}
+          harnessKind={harnessKind}
+          harnessName={harnessName}
+          error={error}
+          onRetry={() => { setError(null); setReconnectKey((key) => key + 1); }}
+          startedAt={startTimeRef.current}
+        />
+      )}
       <div className="terminal-panel-messages">
         {clipboardPending !== null && <button type="button" onClick={() => void copyText(clipboardPending).then(() => setClipboardPending(null)).catch(() => setError(t("terminal.copyFailed")))}>{t("terminal.copyRemote")}</button>}
         {error && <div className="terminal-panel-error" role="alert">

@@ -10,12 +10,16 @@ export default function cueState(pi) {
       const messages = event === 'Stop' ? ctx.sessionManager.buildSessionContext().messages : [];
       const last = [...messages].reverse().find(message => message.role === 'assistant');
       const replyPreview = last ? text(typeof last.content === 'string' ? last.content : last.content.filter(block => block.type === 'text').map(block => block.text).join(' ')) : undefined;
-      const signal = { replyPreview, at: Date.now(), event, sessionId: ctx.sessionManager.getSessionId(), title: text(ctx.sessionManager.getSessionName()), prompt: text(prompt) };
+      const kind = process.env.CUE_HARNESS_KIND || 'pi';
+      const signal = { kind, replyPreview, at: Date.now(), event, sessionId: ctx.sessionManager.getSessionId(), title: text(ctx.sessionManager.getSessionName()), prompt: text(prompt) };
       const token = process.env.CUE_HARNESS_CHANNEL;
+      const extDir = path.join(process.env.HOME || process.env.USERPROFILE || '', '.cue', 'external-signals');
+      const dir = process.env.CUE_HARNESS_SIGNAL_DIR || extDir;
       if (token) {
         fs.writeFileSync('/dev/tty', `\x1b]777;cue;${Buffer.from(JSON.stringify({ token, signal })).toString('base64')}\x07`);
-      } else if (process.env.CUE_HARNESS_SIGNAL_DIR) {
-        const target = path.join(process.env.CUE_HARNESS_SIGNAL_DIR, `${signal.at}-${randomUUID()}.json`);
+      } else if (dir) {
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+        const target = path.join(dir, `${signal.at}-${randomUUID()}.json`);
         fs.writeFileSync(`${target}.tmp`, JSON.stringify(signal), { mode: 0o600 });
         fs.renameSync(`${target}.tmp`, target);
       }

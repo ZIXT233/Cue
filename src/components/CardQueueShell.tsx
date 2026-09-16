@@ -32,6 +32,7 @@ import { LanguageIcon } from "./LanguageIcon";
 import { CardTransfers } from "./CardTransfers";
 import { CardInspectionOverlay } from "./CardInspectionOverlay";
 import { CardDeck } from "./CardDeck";
+import { Icon } from "./QueueIcon";
 import { ExternalSessionCard } from "./ExternalNoticeStack";
 import { CardQueueMinimap } from "./CardQueueMinimap";
 import { CardQuickSearch, type CardQuickSearchItem } from "./CardQuickSearch";
@@ -50,7 +51,7 @@ import { ErrorDialog } from "./ErrorDialog";
 import { useViewportHeight } from "@/hooks/useViewportHeight";
 import { cardWindowLabel, closeCurrentCardWindow, destroyCardWindow, focusMainWindow, isDesktopApp, setCurrentWindowTitle } from "@/lib/card-window";
 import { desktopBridge } from "@/lib/desktop";
-import { externalQueueCards, startableHarnessCards, type QueueCard, type QueueWorkspace } from "@/lib/card-queue";
+import { externalNoticeKey, externalNoticeTitle, externalQueueCards, externalWorkingNotices, newExternalNotices, startableHarnessCards, toExternalCard, type QueueCard, type QueueWorkspace } from "@/lib/card-queue";
 import type { RemoteHost } from "@/lib/remote-hosts";
 import type { SessionInfo } from "@/lib/types";
 
@@ -105,24 +106,6 @@ const openDetachedCardTab = async (cardId: string) => {
   return tab;
 };
 
-function Icon({ name, size = 18 }: { name: "plus" | "stack" | "out" | "maximize" | "down" | "close" | "settings" | "history" | "archive" | "arrow" | "undo" | "bell" | "bell-filled" | "tools" | "clock"; size?: number }) {
-  if (name === "bell-filled") return <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a6 6 0 0 0-6 6v2.9c0 2.1-.8 4.1-2.3 5.6A1.2 1.2 0 0 0 4.6 19h14.8a1.2 1.2 0 0 0 .9-2.5c-1.5-1.5-2.3-3.5-2.3-5.6V8a6 6 0 0 0-6-6Zm-2.7 19a3 3 0 0 0 5.4 0H9.3Z" /></svg>;
-  const paths = {
-    plus: "M12 5v14M5 12h14", stack: "m3 7 9-4 9 4-9 4-9-4Zm0 5 9 4 9-4M3 17l9 4 9-4",
-    out: "M14 3h7v7M21 3 10 14M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5",
-    maximize: "M8 3H3v5m18 0V3h-5M3 16v5h5m8 0h5v-5",
-    down: "M12 3v12m-5-5 5 5 5-5M4 20h16", close: "m6 6 12 12M6 18 18 6",
-    settings: "M4 7h16M4 17h16M8 4v6m8 4v6", history: "M3 11a9 9 0 1 1 2 7M3 4v7h7m2-4v6l4 2",
-    archive: "M3 3h18v5H3zM5 8v13h14V8M10 12h4", arrow: "M19 12H5m6-6-6 6 6 6",
-    bell: "M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4",
-    undo: "m9 14-5-5 5-5M4 9h10a6 6 0 0 1 0 12h-1",
-    tools: "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9z",
-    clock: "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0M12 7v5l3.5 2",
-  };
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]} /></svg>;
-}
-
-
 export function CardQueueShell() {
   const { t, locale, setLocale, supportedLocales } = useI18n();
   const router = useRouter();
@@ -137,6 +120,8 @@ export function CardQueueShell() {
   const { soundEnabled, onSoundToggle, unlockAudio, playDoneSound, playQueueArrivalSound } = useAudio();
   const audio = useMemo(() => ({ soundEnabled, onSoundToggle, playDoneSound, unlockAudio }), [soundEnabled, onSoundToggle, playDoneSound, unlockAudio]);
   const previousSoundCards = useRef<QueueCard[] | null>(null);
+  // External notices are not cards, so their arrivals are tracked by id.
+  const previousExternalNotices = useRef<string[] | null>(null);
   // Both the management surface and detached tabs follow cross-tab changes.
   const { preference, setThemePreference } = useTheme();
   const attentionOption = ATTENTION_MODES.find((option) => option.id === attentionMode) ?? ATTENTION_MODES[0];
@@ -232,14 +217,19 @@ export function CardQueueShell() {
   }, [cards]);
   const workspaces = queue?.workspaces ?? [];
   const titleOf = useCallback((card: QueueCard) => {
-    // External notices have no session; their project name is the whole identity.
-    if (card.externalNotice) return card.externalNotice.project ?? t("external.title");
+    if (card.externalNotice) {
+      const raw = externalNoticeTitle(card.externalNotice);
+      const prefix = t("external.title");
+      return !raw ? prefix : (raw.startsWith(`${prefix} · `) ? raw : `${prefix} · ${raw}`);
+    }
     const workspace = workspaces.find((item) => item.id === card.workspaceId);
     return cardTitle(card, workspace?.name, t("queue.新会话"));
   }, [t, workspaces]);
   const remoteHostOf = (workspace?: QueueWorkspace) => workspace?.kind === "ssh" ? remoteHosts.find((host) => host.id === workspace.sshHost) : undefined;
   const hostLabelOf = (workspace?: QueueWorkspace) => workspace?.kind === "ssh" ? remoteHostOf(workspace)?.name || workspace.sshHost || "SSH" : t("machines.local");
   const cardHostLabel = (card: QueueCard, workspace?: QueueWorkspace) => {
+    // An external notice has no host of ours; the CLI that reported it is the context.
+    if (card.externalNotice) return harnessName(card.externalNotice.kind);
     const host = hostLabelOf(workspace);
     if (!card.harness) return host;
     // Session names go on the card heading, not this host/CLI chip.
@@ -252,6 +242,9 @@ export function CardQueueShell() {
     workspace?.kind === "ssh" && workspace.sshHost ? { host: workspace.sshHost, cwd: workspace.cwd } : undefined;
   const displayProject = (card: QueueCard) => workspaceOf(card)?.name || projectOf(card.cwd);
   const working = cards.filter((card) => card.phase === "working" && !card.detached && !pendingDetach.has(card.id) && !card.harness?.setup);
+  // Sessions running outside Cue have no terminal to inspect, but they are still work
+  // in the background, so the sidebar lists them beside the queue's own.
+  const externalWorking = externalWorkingNotices(queue?.external);
   const archived = cards.filter((card) => card.archivedAt !== undefined).sort((a, b) => b.archivedAt! - a.archivedAt!);
   const detached = cards.filter((card) => card.detached || pendingDetach.has(card.id));
   const reminding = cards.filter((card) => card.remindAt !== undefined && card.archivedAt === undefined).sort((a, b) => (a.remindAt ?? 0) - (b.remindAt ?? 0));
@@ -333,6 +326,7 @@ export function CardQueueShell() {
   }, [ready, inspecting, deckIndex]);
   const cardSearchItems: CardQuickSearchItem[] = [
     ...working.map((card) => ({ card, location: "working" as const })),
+    ...externalWorking.map((notice) => ({ card: toExternalCard(notice), location: "working" as const })),
     ...ready.map((card) => ({ card, location: "queue" as const })),
     ...detached.map((card) => ({ card, location: "detached" as const })),
   ].map(({ card, location }) => {
@@ -399,7 +393,10 @@ export function CardQueueShell() {
     };
   }, [detachedId, cardSearchItems.length, t]);
   const tags = queue?.turnTagDefinitions ?? DEFAULT_TURN_TAGS;
-  const inspected = cards.find((card) => card.id === inspecting && !card.detached && !pendingDetach.has(card.id));
+  const inspected = cards.find((card) => card.id === inspecting && !card.detached && !pendingDetach.has(card.id))
+    ?? (inspecting?.startsWith("external:")
+      ? queue?.external?.filter((n) => `external:${n.id}` === inspecting).map(toExternalCard)[0]
+      : undefined);
   const active = detachedId ? cards.find((card) => card.id === detachedId) : inspected || ready[Math.min(deckIndex, Math.max(0, ready.length - 1))];
   const detachedWindowTitle = detachedId && active
     ? `${active.harness ? `${harnessName(active.harness.kind)} · ` : ""}${titleOf(active)}`
@@ -493,13 +490,16 @@ export function CardQueueShell() {
 
   const resolvedAttention = useRef<string | null>(null);
   const focusNotificationCard = useCallback((id: string) => {
-    const target = queue?.cards.find(card => card.id === id);
-    if (!target || detachedId) return false;
+    if (detachedId) return false;
+    const index = ready.findIndex(card => card.id === id);
+    // External notices live in the overlay, never in queue.json: the deck is the
+    // only place they exist, and focusing one is just focusing that deck position.
+    const target = queue?.cards.find(card => card.id === id) ?? (index >= 0 ? ready[index] : undefined);
+    if (!target) return false;
     if (target.detached || pendingDetach.has(target.id)) {
       openDetachedCardTab(target.id);
       return true;
     }
-    const index = ready.findIndex(card => card.id === id);
     setHistory(null);
     setInspecting(index < 0 ? id : null);
     setFocus({ id, index: Math.max(0, index) });
@@ -536,26 +536,30 @@ export function CardQueueShell() {
     if (!queue) return;
     const completed = completedCards(previousSoundCards.current, queue.cards);
     previousSoundCards.current = queue.cards;
+    // External notices are not queue cards, so `completedCards` cannot see them:
+    // the ids that appeared since the previous snapshot announce themselves.
+    const arrived = newExternalNotices(previousExternalNotices.current, queue.external);
+    previousExternalNotices.current = (queue.external ?? []).map(externalNoticeKey);
     if (detachedId) return;
     const orderedIds = ready.map((card) => card.id);
     const focusedId = focus?.id ?? active?.id;
+    // One banner for both sources: that is the whole point of the overlay reusing
+    // the deck, so a notice arrives exactly like a card coming back.
+    const announce = (key: string, cardId: string, title: string, reply: string) => {
+      const side = queueArrivalSide(orderedIds, focusedId, cardId);
+      if (!side) return false;
+      const quiet = shouldQuietRearQueueArrival(attentionMode, side, document.visibilityState);
+      setArrivalNotices((current) => current.some((notice) => notice.key === key) ? current : [...current, {
+        key, cardId, side, quiet, title, reply,
+      }]);
+      return true;
+    };
     for (const card of completed) {
       if (card.detached) continue;
-      const side = queueArrivalSide(orderedIds, focusedId, card.id);
-      if (!side) continue;
       const key = cardTurnKey(card);
-      const quiet = shouldQuietRearQueueArrival(attentionMode, side, document.visibilityState);
-      const fallback = card.harness?.replyPreview
-        || (card.harness?.kind === "shell" ? t("harness.commandDone") : t("queue.回复已完成"));
-      setArrivalNotices((current) => current.some((notice) => notice.key === key) ? current : [...current, {
-        key,
-        cardId: card.id,
-        side,
-        quiet,
-        title: titleOf(card),
-        reply: fallback,
-      }]);
-      if (!card.session) continue;
+      const announced = announce(key, card.id, titleOf(card), card.harness?.replyPreview
+        || (card.harness?.kind === "shell" ? t("harness.commandDone") : t("queue.回复已完成")));
+      if (!announced || !card.session) continue;
       void fetch(`/api/sessions/${encodeURIComponent(card.session.id)}?tail=8&deferThinking=1&deferMedia=1`, { cache: "no-store" })
         .then((response) => response.ok ? response.json() : Promise.reject(new Error("preview unavailable")))
         .then((data: { context?: { messages?: unknown[] } }) => {
@@ -564,6 +568,17 @@ export function CardQueueShell() {
           setArrivalNotices((current) => current.map((notice) => notice.key === key ? { ...notice, reply } : notice));
         })
         .catch(() => {});
+    }
+    for (const notice of arrived) {
+      // Only the ones that want a human announce themselves; a session that went back to
+      // work just takes its place in the sidebar.
+      if (notice.state !== "attention") continue;
+      // The card shows the reply in full; the banner is a two-line glimpse of it.
+      const reply = (notice.preview ?? notice.prompt ?? t("external.finished"))
+        .replace(/\s+/g, " ").trim().slice(0, 180);
+      announce(`external:${externalNoticeKey(notice)}`, `external:${notice.id}`,
+        `${harnessName(notice.kind)} · ${externalNoticeTitle(notice) ?? t("external.title")}`,
+        reply);
     }
   }, [queue, detachedId, ready, focus?.id, active?.id, attentionMode, t, titleOf]);
 
@@ -823,7 +838,18 @@ export function CardQueueShell() {
   const renderCardContent = (visibleCard: QueueCard, isFront = true, layout?: DetachedCardLayoutControls) => {
     if (visibleCard.externalNotice) {
       const notice = visibleCard.externalNotice;
-      return <ExternalSessionCard notice={notice} isFront={isFront} onDismiss={() => { void run("dismiss_external", { id: notice.id }); }} />;
+      // The chips are the shell's, so a notice is labelled by the same rules as a card.
+      return <ExternalSessionCard notice={notice} isFront={isFront}
+        host={cardHostLabel(visibleCard)}
+        folder={displayProject(visibleCard)}
+        directory={notice.cwd ?? ""}
+        onDismiss={() => {
+          if (inspecting === visibleCard.id) {
+            setInspecting(null);
+          } else {
+            void run("dismiss_external", { id: notice.id });
+          }
+        }} />;
     }
     const cardScore = scoreCard(visibleCard, tags);
     const waitMinutes = cardScore.waiting === 99 ? "99+" : cardScore.waiting;
@@ -930,13 +956,42 @@ export function CardQueueShell() {
         <button className="cq-mobile-settings" onClick={() => { setSettingsSection(getLastSettingsSection(active?.cwd || defaultCwd || null)); setSettings(true); }} aria-label={t("common.settings")}><Icon name="settings" /></button>
 
         <button className="cq-notifications cq-mobile-notifications" onClick={() => void notifications.toggle()} aria-pressed={notifications.enabled} aria-label={notifications.enabled ? "系统完成通知：已开启" : "开启系统完成通知"} title={notifications.enabled ? "系统完成通知已开启，点击关闭" : "开启系统完成通知"}><Icon name={notifications.enabled ? "bell-filled" : "bell"} size={16} /></button>
-        <div className="cq-section-label"><span>{t("queue.WORKING")}</span><span>{working.length.toString().padStart(2, "0")}</span></div>
+        <div className="cq-section-label"><span>{t("queue.WORKING")}</span><span>{(working.length + externalWorking.length).toString().padStart(2, "0")}</span></div>
         <div className="cq-working-list">
           {working.map((card, index) => <button key={card.id} data-transfer-id={card.id} data-transfer-zone="working" className={`cq-small-card ${inspecting === card.id ? "is-selected" : ""}`} disabled={!card.session && !card.harness} onClick={() => setInspecting(card.id)}>
             <span className="cq-small-meta"><span className="cq-dot" />{displayProject(card)}<span className="cq-index">{String(index + 1).padStart(2, "0")}</span></span>
             <strong>{titleOf(card)}</strong><span className="cq-working-bottom"><span className="cq-bars"><i /><i /><i /><i /></span>{t("queue.正在工作")}<span>↗</span></span>
           </button>)}
-          {!working.length && <div className="cq-quiet"><span className="cq-quiet-mark">∿</span><p>{t("queue.后台暂时很安静")}</p><span>{t("queue.回复后的卡片会来到这里，")}<br />{t("queue.让 Agent 继续工作。")}</span></div>}
+          {/* Work Cue does not own: open session inspection on click. */}
+          {externalWorking.map((notice) => {
+            const cardId = `external:${notice.id}`;
+            const harness = harnessName(notice.kind);
+            const rawTitle = externalNoticeTitle(notice);
+            const prefix = t("external.title");
+            const title = !rawTitle
+              ? prefix
+              : rawTitle.startsWith(`${prefix} · `)
+              ? rawTitle
+              : `${prefix} · ${rawTitle}`;
+            return (
+              <button
+                key={cardId}
+                type="button"
+                className={`cq-small-card cq-external-small ${inspecting === cardId ? "is-selected" : ""}`}
+                title={t("external.hint", { name: harness })}
+                onClick={() => setInspecting(cardId)}
+              >
+                <span className="cq-small-meta"><span className="cq-ready-dot" />{harness}</span>
+                <strong>{title}</strong>
+                <span className="cq-working-bottom">
+                  <span className="cq-bars"><i /><i /><i /><i /></span>
+                  {t("queue.正在工作")}
+                  <span>↗</span>
+                </span>
+              </button>
+            );
+          })}
+          {!working.length && !externalWorking.length && <div className="cq-quiet"><span className="cq-quiet-mark">∿</span><p>{t("queue.后台暂时很安静")}</p><span>{t("queue.回复后的卡片会来到这里，")}<br />{t("queue.让 Agent 继续工作。")}</span></div>}
         </div>
         {!!detached.length && <><div className="cq-section-label"><span>{t("queue.独立标签页")}</span><span>{detached.length}</span></div><div className="cq-detached-list">{detached.map((card) => <button key={card.id} onClick={() => openDetachedCardTab(card.id)}><Icon name="out" size={14} /><span>{titleOf(card)}</span><i className={card.phase === "working" ? "cq-dot" : "cq-ready-dot"} /></button>)}</div></>}
         {!!reminding.length && <><div className="cq-section-label"><span>{t("queue.稍后提醒")}</span><span>{remindCount.toString().padStart(2, "0")}</span></div><div className="cq-remind-list">{reminding.map((card) => <button key={card.id} className={`cq-small-card cq-remind-card ${inspecting === card.id ? "is-selected" : ""}`} onClick={() => setInspecting(card.id)}>

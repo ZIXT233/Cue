@@ -11,20 +11,27 @@ function cursorReply(event) {
   if (event === 'preToolUse' || event === 'beforeShellExecution' || event === 'beforeMCPExecution') return { permission: 'allow' };
   return {};
 }
-const kind = process.env.CUE_HARNESS_KIND || (cursorEvents.has(explicitEvent) ? 'cursor' : undefined);
+let inferredKind = undefined;
+const parts = __dirname.split(path.sep);
+const hpIdx = parts.lastIndexOf('harness-plugins');
+if (hpIdx >= 0 && parts[hpIdx + 1]) {
+  inferredKind = parts[hpIdx + 1];
+}
+const kind = process.env.CUE_HARNESS_KIND || inferredKind || (cursorEvents.has(explicitEvent) ? 'cursor' : undefined);
 const token = process.env.CUE_HARNESS_CHANNEL;
 const envDirectory = process.env.CUE_HARNESS_SIGNAL_DIR;
 const activePath = path.join(__dirname, 'active.json');
-// Cursor's user-level hooks.json is global: it also fires for IDE chats and other
-// terminals, which inherit neither SIGNAL_DIR nor CHANNEL. Those sessions are not
-// queue cards, so their events go to the external notification sink instead of
-// being dropped — the queue surfaces them as a transient, never-persisted notice.
+// User-level hooks fire for IDE chats, external terminals, etc., which inherit neither
+// SIGNAL_DIR nor CHANNEL. Those sessions are not queue cards, so their events go to the
+// external notification sink instead of being dropped — the queue surfaces them as a
+// transient, never-persisted notice.
 const externalPath = !envDirectory && !token ? externalDirectory() : undefined;
 // Cursor observe hooks ignore stdout, but answering before stdin is fully read
 // lets the worker tear the process down before replyPreview is written. Reply
 // after the signal (beforeSubmitPrompt still returns continue:true).
 if (kind === 'gemini' || kind === 'grok') process.stdout.write('{}\n');
-if (kind !== 'cursor' && !envDirectory && !token && !legacyActiveDirectory()) {
+const knownHarnesses = new Set(['cursor', 'codex', 'antigravity', 'gemini', 'grok', 'claude', 'opencode', 'codebuddy', 'pi', 'omp']);
+if (!envDirectory && !token && !legacyActiveDirectory() && (!kind || !knownHarnesses.has(kind))) {
   process.exit(0);
 }
 const at = Date.now();
@@ -103,19 +110,24 @@ function consume() {
   done = true;
   try {
     let eventName = explicitEvent || payload.hook_event_name || ({session_start:"SessionStart",user_prompt_submit:"UserPromptSubmit",pre_tool_use:"PreToolUse",post_tool_use:"PostToolUse",post_tool_use_failure:"PostToolUseFailure",stop_cancelled:"StopCancelled",stop:"Stop",stop_failure:"StopFailure",notification:"Notification"})[payload.hookEventName];
-    if (kind === 'antigravity') {
-      if (eventName === 'Stop' && (payload.fullyIdle === false || payload.fully_idle === false)) eventName = 'PreInvocation';
-      // agy has no PermissionRequest event; PreToolUse is the gate (and TUI may ask after it).
-      if (eventName === 'PreToolUse') eventName = 'PermissionRequest';
-    }
+    // The ingress maps names, it never renames an event into a different meaning: a
+    // harness's own vocabulary is passed through and the state machine reads it. A fact
+    // the contract has no name for (agy's "this Stop is not a turn end") travels as a
+    // field, so a reader can always see what was really reported.
+    const fullyIdle = payload.fullyIdle ?? payload.fully_idle;
     const text = value => typeof value === 'string' ? value.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 160) : undefined;
+    const directory = envDirectory || externalPath || (kind === 'cursor' ? undefined : legacyActiveDirectory());
+    const external = externalPath !== undefined && directory === externalPath;
+    // A card preview only has to hint at the reply; an external notice is the only
+    // place that reply will ever be read, so keep its line breaks and its length.
+    const externalReply = value => typeof value === 'string'
+      ? value.replace(/\r\n?/g, '\n').replace(/[^\S\n]+/g, ' ').replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '').trim().slice(0, 2000)
+      : undefined;
     const completion = eventName === 'afterAgentResponse' || ['Stop', 'stop', 'AfterAgent'].includes(eventName);
-    const event = { kind, at, event: eventName, replyPreview: completion ? text(replyText(payload)) : undefined, sessionId: payload.conversationId || payload.conversation_id || payload.session_id || payload.sessionId,
+    const event = { kind, at, event: eventName, fullyIdle: typeof fullyIdle === 'boolean' ? fullyIdle : undefined, replyPreview: completion ? (external ? externalReply(replyText(payload)) : text(replyText(payload))) : undefined, sessionId: payload.conversationId || payload.conversation_id || payload.session_id || payload.sessionId,
       agentId: payload.agent_id || payload.agentId, tool: payload.toolCall?.name ?? payload.tool_name ?? payload.toolName ?? payload.name,
       notification: payload.notification_type ?? payload.notificationType ?? payload.type,
       prompt: ['UserPromptSubmit', 'beforeSubmitPrompt', 'BeforeAgent'].includes(eventName) ? text(payload.prompt) : undefined };
-    const directory = envDirectory || externalPath || (kind === 'cursor' ? undefined : legacyActiveDirectory());
-    const external = externalPath !== undefined && directory === externalPath;
     if (external) { event.workspaceRoot = workspaceRootOf(payload); event.external = true; }
     const debug = process.env.CUE_HARNESS_DEBUG === '1';
     // Keep only field metadata, never prompt/reply text, to diagnose missing previews.

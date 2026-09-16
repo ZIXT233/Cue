@@ -6,7 +6,8 @@
 //! attention, so instead of dropping their events they are collected here and
 //! surfaced as a transient notice that disappears the moment the session works again.
 
-use super::signals::{observe_hook, HookSignal, ProbeState};
+use super::session_label::{self, clean_text, SessionFacts};
+use super::signals::{observe_hook, settle_held, HookSignal, ProbeState};
 use crate::live::LiveBus;
 use crate::models::ExternalNotice;
 use crate::paths::external_signal_dir;
@@ -22,9 +23,13 @@ const NOTICE_TTL_MS: i64 = 60 * 60 * 1000;
 /// Files this old predate the running app; replaying them would resurrect notices
 /// the user already dealt with.
 const SIGNAL_MAX_AGE_MS: i64 = 10 * 60 * 1000;
-const MAX_NOTICES: usize = 8;
+/// Waiting cards first, then sessions that are merely working in the background.
+const MAX_NOTICES: usize = 12;
 const MAX_FILES_PER_TICK: usize = 200;
 const POLL_MS: u64 = 500;
+/// Preview limit for notification signals and fallbacks.
+const PREVIEW_MAX_CHARS: usize = 16_000;
+const PROMPT_MAX_CHARS: usize = 4_000;
 
 struct Tracked {
     notice: ExternalNotice,
@@ -39,33 +44,54 @@ struct Tracked {
 #[derive(Clone)]
 pub struct ExternalRuntime {
     notices: Arc<Mutex<HashMap<String, Tracked>>>,
+    settings: Option<Arc<crate::settings::SettingsStore>>,
 }
 
 impl ExternalRuntime {
-    pub fn new(live: LiveBus) -> Self {
+    pub fn new(live: LiveBus, settings: Arc<crate::settings::SettingsStore>) -> Self {
+        let notices: Arc<Mutex<HashMap<String, Tracked>>> = Arc::new(Mutex::new(HashMap::new()));
+        let probes: Arc<Mutex<HashMap<String, ProbeState>>> = Arc::new(Mutex::new(HashMap::new()));
+        let watch_notices = notices.clone();
+        let watch_settings = settings.clone();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(Duration::from_millis(POLL_MS));
+            if drain(&probes, &watch_notices, Some(&watch_settings)) {
+                live.notify("external");
+            }
+        });
+        Self { notices, settings: Some(settings) }
+    }
+
+    #[cfg(test)]
+    pub fn new_test(live: LiveBus) -> Self {
         let notices: Arc<Mutex<HashMap<String, Tracked>>> = Arc::new(Mutex::new(HashMap::new()));
         let probes: Arc<Mutex<HashMap<String, ProbeState>>> = Arc::new(Mutex::new(HashMap::new()));
         let watch_notices = notices.clone();
         std::thread::spawn(move || loop {
             std::thread::sleep(Duration::from_millis(POLL_MS));
-            if drain(&probes, &watch_notices) {
+            if drain(&probes, &watch_notices, None) {
                 live.notify("external");
             }
         });
-        Self { notices }
+        Self { notices, settings: None }
     }
 
-    /// Notices currently on screen, oldest first. Injected into the queue snapshot
-    /// on read; `queue.json` never learns about them.
+    /// Sessions currently on screen, oldest first within each state. Injected into the
+    /// queue snapshot on read; `queue.json` never learns about them.
     pub fn notices(&self) -> Vec<ExternalNotice> {
+        let settings = self.settings.as_ref().and_then(|s| s.read().ok());
         let mut list: Vec<ExternalNotice> = self.notices.lock().values()
             .filter(|tracked| tracked.dismissed_at.is_none())
+            .filter(|tracked| {
+                settings.as_ref().map(|s| s.is_external_ingress_enabled(&tracked.notice.kind)).unwrap_or(true)
+            })
             .map(|tracked| tracked.notice.clone())
             .collect();
-        list.sort_by_key(|notice| notice.at);
-        if list.len() > MAX_NOTICES {
-            list.drain(..list.len() - MAX_NOTICES);
-        }
+        // Truncation drops the oldest, so the ones that want the user come first: a
+        // background session must never push a waiting card off the deck.
+        list.sort_by_key(|notice| (notice.state != "attention", std::cmp::Reverse(notice.at)));
+        list.truncate(MAX_NOTICES);
+        list.sort_by_key(|notice| (notice.state != "attention", notice.at));
         list
     }
 
@@ -84,9 +110,18 @@ impl ExternalRuntime {
     }
 }
 
-fn drain(probes: &Mutex<HashMap<String, ProbeState>>, notices: &Mutex<HashMap<String, Tracked>>) -> bool {
+fn drain(
+    probes: &Mutex<HashMap<String, ProbeState>>,
+    notices: &Mutex<HashMap<String, Tracked>>,
+    settings: Option<&crate::settings::SettingsStore>,
+) -> bool {
     // Expire first: a missing sink directory must not freeze notices on screen.
     let mut changed = expire(probes, notices);
+    let is_enabled = |kind: &str| -> bool {
+        settings.and_then(|s| s.read().ok()).map(|set| set.is_external_ingress_enabled(kind)).unwrap_or(true)
+    };
+    // A held guess has no follow-up hook to promote it, so this poll is its clock.
+    changed |= promote_held_asks(probes, notices, Some(&is_enabled));
     let Ok(entries) = std::fs::read_dir(external_signal_dir()) else { return changed };
     let mut files: Vec<_> = entries
         .filter_map(|entry| entry.ok())
@@ -101,7 +136,7 @@ fn drain(probes: &Mutex<HashMap<String, ProbeState>>, notices: &Mutex<HashMap<St
     for path in files.into_iter().take(MAX_FILES_PER_TICK) {
         if let Ok(raw) = std::fs::read_to_string(&path) {
             if let Ok(signal) = serde_json::from_str::<HookSignal>(&raw) {
-                changed |= apply(probes, notices, signal);
+                changed |= apply_with_settings(probes, notices, signal, Some(&is_enabled));
             }
         }
         // A malformed file is consumed too: retrying it forever would block the sink.
@@ -110,10 +145,26 @@ fn drain(probes: &Mutex<HashMap<String, ProbeState>>, notices: &Mutex<HashMap<St
     changed
 }
 
+#[cfg(test)]
 fn apply(probes: &Mutex<HashMap<String, ProbeState>>, notices: &Mutex<HashMap<String, Tracked>>, signal: HookSignal) -> bool {
+    apply_with_settings(probes, notices, signal, None)
+}
+
+fn apply_with_settings(
+    probes: &Mutex<HashMap<String, ProbeState>>,
+    notices: &Mutex<HashMap<String, Tracked>>,
+    signal: HookSignal,
+    is_enabled: Option<&dyn Fn(&str) -> bool>,
+) -> bool {
     let now = now_ms();
     if signal.agent_id.is_some() || now - signal.at > SIGNAL_MAX_AGE_MS {
         return false;
+    }
+    let kind = signal.kind.clone().unwrap_or_else(|| "cursor".into());
+    if let Some(check) = is_enabled {
+        if !check(&kind) {
+            return false;
+        }
     }
     let Some(key) = notice_key(&signal) else { return false };
     let state = {
@@ -124,21 +175,29 @@ fn apply(probes: &Mutex<HashMap<String, ProbeState>>, notices: &Mutex<HashMap<St
         map.insert(key.clone(), next);
         state
     };
-    let mut map = notices.lock();
-    // A closed chat leaves nothing to attend to, even though `sessionEnd` folds into
-    // the same Stop state a finished turn does.
+    // A closed chat leaves nothing behind, even though `sessionEnd` folds into the same
+    // Stop state a finished turn does.
     if signal.event == "sessionEnd" {
-        return map.remove(&key).is_some();
+        return notices.lock().remove(&key).is_some();
     }
+    // Going back to work is not a retraction: the session keeps a background entry, so
+    // the sidebar can show what is running out there as well as who wants the user.
     if state == "working" {
-        return map.remove(&key).is_some();
+        return set_working(&notices, &key, &signal, now);
     }
     if state != "attention" {
+        let mut map = notices.lock();
         if let Some(tracked) = map.get_mut(&key) {
             tracked.seen_at = now;
         }
         return false;
     }
+    // Reading the session's own files costs disk work, and the notices lock is read on
+    // every snapshot, so it is never held across it. Everything that decides whether
+    // this ask is still wanted happens below, under one lock, as it did before.
+    let kind = signal.kind.clone().unwrap_or_else(|| "cursor".into());
+    let facts = session_facts(&kind, signal.session_id.as_deref());
+    let mut map = notices.lock();
     // A hand-dismissed notice stays down until this session asks something newer;
     // re-raising the exact event the user just closed would be a fight, not a feature.
     if let Some(tracked) = map.get_mut(&key) {
@@ -149,13 +208,21 @@ fn apply(probes: &Mutex<HashMap<String, ProbeState>>, notices: &Mutex<HashMap<St
             }
         }
     }
+    // The hook reports the workspace the session is running in, which is also what
+    // names the card; the chat store only fills in what the hook left out.
+    let cwd = signal.workspace_root.clone().or(facts.cwd);
     let notice = ExternalNotice {
         id: key.clone(),
-        kind: signal.kind.clone().unwrap_or_else(|| "cursor".into()),
+        kind,
         session_id: signal.session_id.clone(),
-        project: signal.workspace_root.as_deref().and_then(project_name),
+        project: cwd.as_deref().and_then(project_name),
+        cwd,
+        session_name: facts.name,
+        prompt: notice_prompt(&signal, facts.prompt),
         state,
-        preview: notice_preview(&signal),
+        // The session's own store has the reply in full; the hook only ever has a clip.
+        preview: facts.reply.and_then(|reply| clean_text(&reply, PREVIEW_MAX_CHARS)).or_else(|| notice_preview(&signal)),
+        turns: facts.turns,
         notification: signal.notification.clone(),
         tool: signal.tool.clone(),
         at: signal.at,
@@ -164,6 +231,76 @@ fn apply(probes: &Mutex<HashMap<String, ProbeState>>, notices: &Mutex<HashMap<St
     // becoming visible again even when its own fields are identical.
     let changed = map.get(&key).is_none_or(|tracked| tracked.notice != notice || tracked.dismissed_at.is_some());
     map.insert(key, Tracked { notice, seen_at: now, dismissed_at: None });
+    changed
+}
+
+/// Promote held guesses whose window has run out.
+///
+/// An external session has no card and no other reader, so its poll is the only clock
+/// that can notice a tool never came back. The promoted ask is replayed through the
+/// normal ingress, so the notice it raises is built exactly like any other one.
+fn promote_held_asks(
+    probes: &Mutex<HashMap<String, ProbeState>>,
+    notices: &Mutex<HashMap<String, Tracked>>,
+    is_enabled: Option<&dyn Fn(&str) -> bool>,
+) -> bool {
+    let now = now_ms();
+    let promoted: Vec<HookSignal> = {
+        let mut map = probes.lock();
+        let mut out = Vec::new();
+        for (key, current) in map.iter_mut() {
+            if current.held_attention_at.is_none() { continue; }
+            let Some(next) = settle_held(current.clone(), now) else { continue };
+            out.push(HookSignal {
+                kind: next.kind.clone(),
+                at: now,
+                event: "PermissionRequest".into(),
+                session_id: next.session_id.clone(),
+                // Not part of the probe: the tool is only ever known at the moment of
+                // the hold, and the notice is the one place that would show it.
+                tool: current.held_tool.clone(),
+                workspace_root: key.strip_prefix("path:").map(str::to_string),
+                external: Some(true),
+                ..HookSignal::default()
+            });
+            *current = next;
+        }
+        out
+    };
+    promoted.into_iter().fold(false, |changed, signal| {
+        apply_with_settings(probes, notices, signal, is_enabled) || changed
+    })
+}
+
+/// Track a session that is working. An entry that already exists keeps its identity and
+/// only loses what belonged to the previous ask; a session seen working for the first
+/// time is described by the hook payload alone, because nothing has asked anything yet.
+fn set_working(notices: &Mutex<HashMap<String, Tracked>>, key: &str, signal: &HookSignal, now: i64) -> bool {
+    let mut map = notices.lock();
+    let mut notice = map.get(key).map(|tracked| tracked.notice.clone()).unwrap_or_else(|| ExternalNotice {
+        id: key.to_string(),
+        kind: signal.kind.clone().unwrap_or_else(|| "cursor".into()),
+        session_id: signal.session_id.clone(),
+        project: signal.workspace_root.as_deref().and_then(project_name),
+        cwd: signal.workspace_root.clone(),
+        session_name: None,
+        prompt: None,
+        turns: Vec::new(),
+        state: "working".into(),
+        preview: None,
+        notification: None,
+        tool: None,
+        at: signal.at,
+    });
+    notice.state = "working".into();
+    notice.at = signal.at;
+    // The wait is over, so what described it goes. The ask and the conversation stay:
+    // they are how this session is recognised while it works.
+    notice.tool = None;
+    notice.notification = None;
+    notice.preview = None;
+    let changed = map.get(key).is_none_or(|tracked| tracked.notice != notice);
+    map.insert(key.to_string(), Tracked { notice, seen_at: now, dismissed_at: None });
     changed
 }
 
@@ -193,10 +330,24 @@ fn notice_key(signal: &HookSignal) -> Option<String> {
 }
 
 fn notice_preview(signal: &HookSignal) -> Option<String> {
-    let text = signal.reply_preview.as_ref().or(signal.prompt.as_ref())?;
-    let clipped: String = text.chars().filter(|c| !c.is_control()).take(160).collect();
-    let clipped = clipped.trim();
-    (!clipped.is_empty()).then(|| clipped.to_string())
+    clean_text(signal.reply_preview.as_deref()?, PREVIEW_MAX_CHARS)
+}
+
+/// The ask this turn answers. The session file knows it even when the hook that
+/// raised the notice did not carry one (permission waits never do).
+fn notice_prompt(signal: &HookSignal, from_file: Option<String>) -> Option<String> {
+    if let Some(prompt) = from_file {
+        return clean_text(&prompt, PROMPT_MAX_CHARS);
+    }
+    let text = signal.prompt.as_deref().or(signal.first_prompt.as_deref())?;
+    clean_text(text, PROMPT_MAX_CHARS)
+}
+
+/// What the session's own store knows, read through the one table that says which
+/// harness can answer what (`session_label::access`).
+fn session_facts(kind: &str, session_id: Option<&str>) -> SessionFacts {
+    let Some(id) = session_id.filter(|id| !id.is_empty()) else { return SessionFacts::default() };
+    session_label::session_facts(kind, id)
 }
 
 fn project_name(root: &str) -> Option<String> {
@@ -222,13 +373,18 @@ fn now_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::harness::signals::HELD_ATTENTION_MS;
+
+    /// An id no chat store can exist for: the notice reads session files, and a fixture
+    /// that happened to match a real session would make these tests machine-dependent.
+    const SESSION: &str = "00000000-0000-4000-8000-00000000feed";
 
     fn signal(event: &str, at: i64) -> HookSignal {
         HookSignal {
             kind: Some("cursor".into()),
             at,
             event: event.into(),
-            session_id: Some("c6553b99-eef0-4d2a-af62-8deaa625f841".into()),
+            session_id: Some(SESSION.into()),
             workspace_root: Some("/home/u/Projects/cue".into()),
             external: Some(true),
             ..HookSignal::default()
@@ -268,18 +424,65 @@ mod tests {
     }
 
     #[test]
-    fn attention_raises_and_working_retracts() {
+    fn attention_raises_and_working_keeps_a_background_entry() {
         let (probes, notices) = store();
         let at = now();
-        assert!(apply(&probes, &notices, signal("preToolUse", at)));
+        assert!(apply(&probes, &notices, signal("stop", at)));
         let raised = only(&notices);
         assert_eq!(raised.project.as_deref(), Some("cue"));
         assert_eq!(raised.state, "attention");
-        assert_eq!(raised.id, "c6553b99-eef0-4d2a-af62-8deaa625f841");
+        assert_eq!(raised.id, SESSION);
         // The same attention event must not churn the notice (and its SSE refresh).
-        assert!(!apply(&probes, &notices, signal("preToolUse", at)));
+        assert!(!apply(&probes, &notices, signal("stop", at)));
+        // Back to work: the wait is over, but the session is still out there working.
         assert!(apply(&probes, &notices, signal("beforeSubmitPrompt", at + 1)));
-        assert!(notices.lock().is_empty());
+        let working = only(&notices);
+        assert_eq!(working.state, "working");
+        assert_eq!(working.at, at + 1);
+        assert_eq!(working.tool, None);
+        // The next ask is a fresh attention event, not a working one repeated.
+        assert!(apply(&probes, &notices, signal("stop", at + 2)));
+        assert_eq!(only(&notices).state, "attention");
+    }
+
+    /// A cursor tool start is a guess, not an ask: it raises nothing until its window
+    /// runs out with the tool still silent. This is what keeps the tray quiet while an
+    /// external agent reads files.
+    #[test]
+    fn a_held_tool_start_only_raises_after_its_window() {
+        let (probes, notices) = store();
+        let at = now() - HELD_ATTENTION_MS;
+        assert!(apply(&probes, &notices, signal("preToolUse", at)));
+        assert_eq!(only(&notices).state, "working");
+        assert_eq!(only(&notices).tool, None);
+        // The tool never reported back: the guess is promoted, and once only.
+        assert!(promote_held_asks(&probes, &notices, None));
+        assert_eq!(only(&notices).state, "attention");
+        assert!(!promote_held_asks(&probes, &notices, None));
+    }
+
+    /// A tool that answers inside the window retracts the guess: nothing is ever shown.
+    #[test]
+    fn a_tool_that_answers_retracts_the_hold() {
+        let (probes, notices) = store();
+        let at = now();
+        assert!(apply(&probes, &notices, signal("preToolUse", at)));
+        assert!(apply(&probes, &notices, signal("postToolUse", at + 1)));
+        assert!(!promote_held_asks(&probes, &notices, None));
+        assert_eq!(only(&notices).state, "working");
+    }
+
+    #[test]
+    fn a_session_first_seen_working_still_gets_an_entry() {
+        let (probes, notices) = store();
+        assert!(apply(&probes, &notices, signal("beforeSubmitPrompt", now())));
+        let entry = only(&notices);
+        assert_eq!(entry.state, "working");
+        assert_eq!(entry.kind, "cursor");
+        assert_eq!(entry.project.as_deref(), Some("cue"));
+        // Nothing asked yet, so there is nothing to show but who it is.
+        assert_eq!(entry.prompt, None);
+        assert_eq!(entry.preview, None);
     }
 
     #[test]
@@ -291,6 +494,54 @@ mod tests {
         let raised = only(&notices);
         assert_eq!(raised.preview.as_deref(), Some("改好了，顺便补了测试。"));
         assert_eq!(raised.notification, None);
+    }
+
+    /// A notice is a card the user cannot type into, so the reply is the content:
+    /// it keeps the line breaks a CLI reply is built from instead of collapsing them.
+    #[test]
+    fn a_reply_keeps_its_lines() {
+        let (probes, notices) = store();
+        let mut stop = signal("stop", now());
+        stop.reply_preview = Some("第一行\n\n\n第二行 \u{7}尾部".into());
+        assert!(apply(&probes, &notices, stop));
+        assert_eq!(only(&notices).preview.as_deref(), Some("第一行\n\n第二行 尾部"));
+    }
+
+    #[test]
+    fn a_reply_is_kept_long_enough_to_read() {
+        let (probes, notices) = store();
+        let mut stop = signal("stop", now());
+        stop.reply_preview = Some("x".repeat(20_000));
+        assert!(apply(&probes, &notices, stop));
+        assert_eq!(only(&notices).preview.map(|preview| preview.chars().count()), Some(PREVIEW_MAX_CHARS));
+    }
+
+    /// Permission waits carry no prompt in the hook payload, so the card falls back
+    /// to what it can read instead of showing an empty ask.
+    #[test]
+    fn the_ask_falls_back_to_whatever_the_hook_sent() {
+        let mut asked = signal("preToolUse", now());
+        asked.prompt = Some("帮我改一下队列排序".into());
+        assert_eq!(notice_prompt(&asked, None).as_deref(), Some("帮我改一下队列排序"));
+        let mut resumed = signal("preToolUse", now());
+        resumed.first_prompt = Some("/resume".into());
+        assert_eq!(notice_prompt(&resumed, None).as_deref(), Some("/resume"));
+        assert_eq!(notice_prompt(&asked, Some("来自会话文件的提问".into())).as_deref(), Some("来自会话文件的提问"));
+        assert_eq!(notice_prompt(&signal("preToolUse", now()), None), None);
+    }
+
+    /// The hook's workspace names the card; a chat store that disagrees must not
+    /// rename a session the user is looking at.
+    #[test]
+    fn hook_workspace_names_the_card() {
+        let mut reported = signal("stop", now());
+        reported.session_id = None;
+        reported.workspace_root = Some("/home/u/Projects/cue".into());
+        let (probes, notices) = store();
+        assert!(apply(&probes, &notices, reported));
+        let raised = only(&notices);
+        assert_eq!(raised.project.as_deref(), Some("cue"));
+        assert_eq!(raised.cwd.as_deref(), Some("/home/u/Projects/cue"));
     }
 
     #[test]
@@ -348,13 +599,13 @@ mod tests {
     fn a_dismissed_notice_stays_down_for_the_same_ask() {
         let (probes, notices) = store();
         let at = now();
-        apply(&probes, &notices, signal("preToolUse", at));
+        apply(&probes, &notices, signal("stop", at));
         assert_eq!(visible(&notices).len(), 1);
-        assert!(dismiss(&notices, "c6553b99-eef0-4d2a-af62-8deaa625f841"));
+        assert!(dismiss(&notices, SESSION));
         assert!(visible(&notices).is_empty());
-        assert!(!dismiss(&notices, "c6553b99-eef0-4d2a-af62-8deaa625f841"));
+        assert!(!dismiss(&notices, SESSION));
         // Replaying the very event the user closed must not fight them.
-        assert!(!apply(&probes, &notices, signal("preToolUse", at)));
+        assert!(!apply(&probes, &notices, signal("stop", at)));
         assert!(visible(&notices).is_empty());
     }
 
@@ -362,8 +613,8 @@ mod tests {
     fn a_newer_ask_clears_the_dismissal() {
         let (probes, notices) = store();
         let at = now();
-        apply(&probes, &notices, signal("preToolUse", at));
-        dismiss(&notices, "c6553b99-eef0-4d2a-af62-8deaa625f841");
+        apply(&probes, &notices, signal("stop", at));
+        dismiss(&notices, SESSION);
         assert!(visible(&notices).is_empty());
         // A fresh attention event is a new ask, so the notice earns its way back.
         assert!(apply(&probes, &notices, signal("stop", at + 1)));
@@ -374,12 +625,31 @@ mod tests {
     fn working_after_a_dismissal_clears_the_tracking() {
         let (probes, notices) = store();
         let at = now();
-        apply(&probes, &notices, signal("preToolUse", at));
-        dismiss(&notices, "c6553b99-eef0-4d2a-af62-8deaa625f841");
+        apply(&probes, &notices, signal("stop", at));
+        dismiss(&notices, SESSION);
         assert!(apply(&probes, &notices, signal("beforeSubmitPrompt", at + 1)));
+        // The session went back to work: it is a background entry now, and a hand-close
+        // of the old ask does not carry over to the one it is working on.
+        let entries = visible(&notices);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].state, "working");
+        assert!(apply(&probes, &notices, signal("stop", at + 2)));
+        assert_eq!(only(&notices).state, "attention");
+    }
+
+    #[test]
+    fn disabled_external_ingress_ignores_signals() {
+        let (probes, notices) = store();
+        let at = now();
+        let disabled_cursor = |k: &str| k != "cursor";
+
+        let sig = signal("stop", at);
+        assert!(!apply_with_settings(&probes, &notices, sig, Some(&disabled_cursor)));
         assert!(notices.lock().is_empty());
-        // The session went back to work, so the next ask raises a plain notice again.
-        assert!(apply(&probes, &notices, signal("preToolUse", at + 2)));
-        assert_eq!(visible(&notices).len(), 1);
+
+        let enabled_cursor = |k: &str| k == "cursor";
+        let sig2 = signal("stop", at);
+        assert!(apply_with_settings(&probes, &notices, sig2, Some(&enabled_cursor)));
+        assert_eq!(notices.lock().len(), 1);
     }
 }

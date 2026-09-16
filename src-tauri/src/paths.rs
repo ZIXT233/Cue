@@ -47,8 +47,13 @@ pub fn external_signal_dir() -> PathBuf {
     data_dir().join("external-signals")
 }
 
+/// Cue's per-CLI hook plugins. Each kind owns one directory of files here.
+pub fn plugins_dir() -> PathBuf {
+    data_dir().join("harness-plugins")
+}
+
 pub fn plugin_root(kind: &str) -> PathBuf {
-    data_dir().join("harness-plugins").join(kind)
+    plugins_dir().join(kind)
 }
 
 pub fn ssh_runtime_dir(workspace_id: &str) -> PathBuf {

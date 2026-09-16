@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-// Lifecycle boundaries follow Orca's OpenCode status plugin; see docs/harness/opencode.
+// Lifecycle boundaries follow Orca's OpenCode status plugin; see docs/harness/hook-api.md.
 export const CueState = async ({ client }) => {
   const sessions = new Map();
   const prompted = new Set();
@@ -30,13 +30,16 @@ export const CueState = async ({ client }) => {
         ...extra,
       };
       const token = process.env.CUE_HARNESS_CHANNEL;
+      const extDir = path.join(process.env.HOME || process.env.USERPROFILE || '', '.cue', 'external-signals');
+      const dir = process.env.CUE_HARNESS_SIGNAL_DIR || extDir;
       if (token) {
         fs.writeFileSync(
           process.env.CUE_HARNESS_TTY || '/dev/tty',
           `\x1b]777;cue;${Buffer.from(JSON.stringify({ token, signal })).toString('base64')}\x07`,
         );
-      } else if (process.env.CUE_HARNESS_SIGNAL_DIR) {
-        const file = path.join(process.env.CUE_HARNESS_SIGNAL_DIR, `${signal.at}-${randomUUID()}.json`);
+      } else if (dir) {
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+        const file = path.join(dir, `${signal.at}-${randomUUID()}.json`);
         fs.writeFileSync(`${file}.tmp`, JSON.stringify(signal), { mode: 0o600 });
         fs.renameSync(`${file}.tmp`, file);
       }

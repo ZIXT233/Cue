@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { useI18n } from "@/hooks/useI18n";
 import { ProviderIcon } from "./ProviderIcon";
 import { TerminalPanel, type TerminalConnectionStatus } from "./TerminalPanel";
+import { TerminalStartupProgress } from "./TerminalStartupProgress";
 import { SshAuthChallenge, useSshAuthChallenge } from "./SshAuthChallenge";
 import { machineRequest } from "./RemoteHostsSettings";
 import { needsSshSecret } from "@/lib/workspace-machine-errors";
@@ -25,6 +26,7 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
   const [switchPosition, setSwitchPosition] = useState<{ left: number; top: number } | null>(null);
   const [mode] = useState<"cli">("cli");
   const [busy, setBusy] = useState(false);
+  const [startingKind, setStartingKind] = useState<string | null>(null);
   const [actionError, setActionError] = useState("");
   const auth = useSshAuthChallenge();
   const [pendingAction, setPendingAction] = useState<{ action: string; data: Record<string, unknown> } | null>(null);
@@ -142,6 +144,7 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
     <span>{logBusy ? t("harness.logsSaving") : t("harness.logs")}</span>
   </button>;
   const terminal = harness ? <TerminalPanel key={`${harness.terminalId}:${connection}`} cardId={card.id} embedded remote={harness.remote} themeProfile={harness.kind === "grok" ? "grok" : undefined} conptyCursorHide={harness.kind !== "codex"} readOnly={card.archivedAt !== undefined || harness.state === "exited" || harness.state === "error"} tab={{ id: harness.terminalId, cwd: card.cwd, restored: true }} active={active} focusReporting={harness.kind !== "shell"} inQueue={inQueue}
+    harnessKind={harness.kind} harnessName={harnessName(harness.kind)} isStarting={harness.state === "starting" || connection > 0}
     onOutput={harness.kind === "shell" && harness.shellCommandNotifications !== false ? data => shellProbe.current?.(data) : undefined} onStatusChange={setTerminalStatus} onRestart={() => void act(harness.providerSessionId ? "harness_resume" : "harness_reopen")} onClosed={() => {}} onCloseError={() => {}} /> : null;
 
   return <>
@@ -180,11 +183,22 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
       </div>}
       {disconnected && showTranscript && <button type="button" className="cq-terminal-recovery-return" onClick={() => setShowTranscript(false)}>{t("harness.backToConnection")}</button>}
       {terminal}
+    </div> : (busy && startingKind) ? <div className="cq-harness-body" data-harness={startingKind}>
+      <TerminalStartupProgress
+        stage="preparing"
+        remote={Boolean(sshHost)}
+        sshHost={sshHost}
+        harnessKind={startingKind}
+        harnessName={harnessName(startingKind)}
+      />
     </div> : mode === "cli" ? <div className="cq-harness-empty"><div className="cq-harness-picker">
       <h3>{t("harness.choose")}</h3>
       <p>{t("harness.chooseHint")}</p>
       <div className="cq-harness-options">
-      {harnessPicker.map(item => <button key={item.id} type="button" className="cq-harness-option" disabled={busy} onClick={() => void act("harness_start", { kind: item.id })}>
+      {harnessPicker.map(item => <button key={item.id} type="button" className="cq-harness-option" disabled={busy} onClick={() => {
+        setStartingKind(item.id);
+        void act("harness_start", { kind: item.id }).finally(() => setStartingKind(null));
+      }}>
         <span className="cq-harness-option-icon" aria-hidden="true">{item.id === "shell" ? <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3m6 0h4"/></svg> : item.id === "pi" || item.id === "omp" ? <span className="cq-harness-pi-mark">π</span> : <ProviderIcon id={providerIconId(item.id)} size={28} />}</span>
         <span><strong>{item.name}</strong><small>{busy ? t("harness.checking") : item.id === "shell" ? t("harness.shellDescription") : item.description}</small></span><span className="cq-harness-option-arrow" aria-hidden="true">↗</span>
       </button>)}

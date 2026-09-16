@@ -702,6 +702,7 @@ fn tools_json(settings: &crate::models::AppSettings) -> Value {
         "debugLogging": crate::debuglog::verbose(),
         "logPath": crate::debuglog::log_path().to_string_lossy(),
         "logDir": crate::paths::logs_dir().to_string_lossy(),
+        "externalIngress": settings.external_ingress,
     })
 }
 
@@ -710,6 +711,11 @@ async fn get_tools(State(state): State<AppState>) -> AppResult<impl IntoResponse
 }
 
 async fn put_tools(State(state): State<AppState>, Json(body): Json<Value>) -> AppResult<impl IntoResponse> {
+    if let Some(harness) = body.get("externalHarness").and_then(|v| v.as_str()) {
+        let enabled = body.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
+        let settings = state.settings.set_external_ingress(harness, enabled).await?;
+        return Ok(Json(tools_json(&settings)));
+    }
     if let Some(enabled) = body.get("debugLogging").and_then(|v| v.as_bool()) {
         let settings = state.settings.set_debug_logging(enabled).await?;
         return Ok(Json(tools_json(&settings)));
@@ -1177,7 +1183,7 @@ pub fn build_state(resource_dir: Option<PathBuf>) -> AppState {
         queue: Arc::new(QueueStore::new(live.clone())),
         terminals: terminals.clone(),
         harness: HarnessRuntime::new(live.clone(), terminals),
-        external: ExternalRuntime::new(live.clone()),
+        external: ExternalRuntime::new(live.clone(), settings.clone()),
         hosts: Arc::new(HostStore::new()),
         settings,
         live,

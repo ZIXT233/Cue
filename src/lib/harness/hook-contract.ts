@@ -11,48 +11,12 @@ export const HOOK_ENV = {
 } as const;
 
 /**
- * Public lifecycle events for the shared hook API.
- * Built-in CLI adapters may emit aliases; normalizeHookSignal maps them here.
+ * A harness's own event names are read in exactly one place — `meaningOf` in the
+ * harness signal path — and turn straight into what a card does with them. There is
+ * deliberately no intermediate vocabulary of "canonical events": such a layer only
+ * produced a name that had to be translated again, and it invited filing an event under
+ * a meaning it does not have.
  */
-export const CANONICAL_HOOK_EVENTS = [
-  "SessionStart",
-  "UserPromptSubmit",
-  "Stop",
-  "PermissionRequest",
-  "SessionInfo",
-] as const;
-
-export type CanonicalHookEvent = (typeof CANONICAL_HOOK_EVENTS)[number];
-
-/** CLI-specific names folded into the shared contract before observeHook. */
-export const HOOK_EVENT_ALIASES: Record<string, CanonicalHookEvent> = {
-  sessionStart: "SessionStart",
-  SessionStart: "SessionStart",
-  beforeSubmitPrompt: "UserPromptSubmit",
-  UserPromptSubmit: "UserPromptSubmit",
-  BeforeAgent: "UserPromptSubmit",
-  PreInvocation: "UserPromptSubmit",
-  PreToolUse: "UserPromptSubmit",
-  PostToolUse: "UserPromptSubmit",
-  PostToolUseFailure: "UserPromptSubmit",
-  BeforeTool: "UserPromptSubmit",
-  AfterTool: "UserPromptSubmit",
-  PostInvocation: "UserPromptSubmit",
-  stop: "Stop",
-  Stop: "Stop",
-  StopFailure: "Stop",
-  StopCancelled: "Stop",
-  sessionEnd: "Stop",
-  AfterAgent: "Stop",
-  afterAgentResponse: "Stop",
-  preToolUse: "UserPromptSubmit",
-  postToolUse: "UserPromptSubmit",
-  postToolUseFailure: "UserPromptSubmit",
-  beforeShellExecution: "PermissionRequest",
-  beforeMCPExecution: "PermissionRequest",
-  PermissionRequest: "PermissionRequest",
-  SessionInfo: "SessionInfo",
-};
 
 /** Cursor TUI user/project hooks. Permission events return allow: observation never gates the session. */
 export const CURSOR_HOOK_EVENTS = [
@@ -86,17 +50,8 @@ export interface HookSignal {
   firstPrompt?: string;
   title?: string;
   notification?: string;
-}
-
-export function isCanonicalHookEvent(event: string): event is CanonicalHookEvent {
-  return (CANONICAL_HOOK_EVENTS as readonly string[]).includes(event);
-}
-
-/** Map adapter-specific event names onto the shared public contract. */
-export function normalizeHookSignal<T extends HookSignal>(signal: T): T {
-  const event = HOOK_EVENT_ALIASES[signal.event];
-  if (!event || event === signal.event) return signal;
-  return { ...signal, event };
+  /** Antigravity: whether a `Stop` really ended the turn (`false` = paused mid-turn). */
+  fullyIdle?: boolean;
 }
 
 export function buildHookSignal(input: {
@@ -109,6 +64,7 @@ export function buildHookSignal(input: {
   tool?: string;
   notification?: string;
   agentId?: string;
+  fullyIdle?: boolean;
   at?: number;
 }): HookSignal {
   const clean = (value: unknown) => typeof value === "string"
@@ -120,7 +76,7 @@ export function buildHookSignal(input: {
   return {
     kind: input.kind,
     at: Number.isFinite(input.at) ? Number(input.at) : Date.now(),
-    event: HOOK_EVENT_ALIASES[input.event] ?? input.event,
+    event: input.event,
     sessionId,
     title: clean(input.title),
     prompt: clean(input.prompt),
@@ -128,6 +84,7 @@ export function buildHookSignal(input: {
     tool: typeof input.tool === "string" ? input.tool : undefined,
     notification: typeof input.notification === "string" ? input.notification : undefined,
     agentId: typeof input.agentId === "string" ? input.agentId : undefined,
+    fullyIdle: typeof input.fullyIdle === "boolean" ? input.fullyIdle : undefined,
   };
 }
 

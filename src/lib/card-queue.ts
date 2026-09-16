@@ -40,6 +40,12 @@ export interface QueueCard {
    */
   externalNotice?: ExternalNotice;
 }
+/** One message of an external session's own record, in transcript order. */
+export interface ExternalTurn {
+  role: "user" | "assistant";
+  text: string;
+}
+
 /** An attention call from a session Cue never launched (Cursor IDE, another terminal). */
 export interface ExternalNotice {
   /** Provider conversation id, or the workspace path when the CLI reports none. */
@@ -48,31 +54,77 @@ export interface ExternalNotice {
   sessionId?: string;
   /** Last path segment of the workspace the session is working in. */
   project?: string;
-  /** Notices only exist while the session wants a human. */
-  state: "attention";
+  /** Full workspace directory, so the card can name the folder it is really in. */
+  cwd?: string;
+  /** Real session title from the provider's own store, when it can be read. */
+  sessionName?: string;
+  /** Latest user prompt: the ask whose turn just ended. */
+  prompt?: string;
+  /** Tail of the conversation, oldest first. Empty when only the hook reported it. */
+  turns?: ExternalTurn[];
+  /** "attention" while the session wants a human, "working" while it has the floor. */
+  state: "attention" | "working";
+  /** The reply itself; a notice has no terminal, so this is the card's content. */
   preview?: string;
   notification?: string;
   tool?: string;
   at: number;
 }
 
-/**
- * Present an external notice as a card the deck can lay out. It carries no session
- * and no harness, so every queue action that keys off those stays inert; the id is
- * namespaced so it can never collide with a real card (or another overlay entry).
- */
-export function externalQueueCards(notices: ExternalNotice[] | undefined): QueueCard[] {
-  return (notices ?? []).map((notice) => ({
+export function toExternalCard(notice: ExternalNotice): QueueCard {
+  return {
     id: `external:${notice.id}`,
-    cwd: notice.project ?? "",
+    cwd: notice.cwd ?? notice.project ?? "",
     session: null,
-    phase: "attention" as const,
+    phase: notice.state === "working" ? ("working" as const) : ("attention" as const),
     createdAt: notice.at,
     readyAt: notice.at,
     // The scheduler never sees these, but sorting must stay stable if it ever does.
     waitingSince: notice.at,
     externalNotice: notice,
-  }));
+  };
+}
+
+/**
+ * Present an external notice as a card the deck can lay out. It carries no session
+ * and no harness, so every queue action that keys off those stays inert; the id is
+ * namespaced so it can never collide with a real card (or another overlay entry).
+ * Only the ones that want a human belong on the deck.
+ */
+export function externalQueueCards(notices: ExternalNotice[] | undefined): QueueCard[] {
+  return (notices ?? []).filter((notice) => notice.state === "attention").map(toExternalCard);
+}
+
+/**
+ * Sessions working outside Cue. They are not cards — there is no terminal to open and
+ * nothing to type into — so the sidebar lists them as background entries.
+ */
+export function externalWorkingNotices(notices: ExternalNotice[] | undefined): ExternalNotice[] {
+  return (notices ?? []).filter((notice) => notice.state === "working");
+}
+
+/** What the notice is about: the session's own name, else the ask, else the folder. */
+export function externalNoticeTitle(notice: ExternalNotice): string | undefined {
+  return notice.sessionName ?? notice.prompt ?? notice.project;
+}
+
+/**
+ * Identity of one ask, not of one session: the same chat can come back with a newer
+ * request, and that is a new arrival for the banner even though the card is the same.
+ */
+export function externalNoticeKey(notice: ExternalNotice): string {
+  return `${notice.id}:${notice.at}`;
+}
+
+/**
+ * Notices that were not in the previous snapshot. `null` means nothing has been
+ * seen yet, which only arms the comparison: a first snapshot must never announce
+ * the notices that were already on screen when the page loaded.
+ */
+export function newExternalNotices(previous: string[] | null, notices: ExternalNotice[] | undefined): ExternalNotice[] {
+  if (!previous) return [];
+  const before = new Set(previous);
+  return (notices ?? []).filter((notice) => !before.has(externalNoticeKey(notice)));
 }
 
 export interface CardQueue {

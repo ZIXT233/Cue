@@ -175,6 +175,8 @@ mod tests {
 
     #[test]
     fn direct_launch_resolves_newest_cursor_version() {
+        let _orig = std::env::var_os("LOCALAPPDATA");
+        unsafe { std::env::set_var("LOCALAPPDATA", r"C:\Users\tester\AppData\Local"); }
         let root = std::env::temp_dir().join(format!("cue-cursor-{}", std::process::id()));
         let versions = root.join("versions");
         std::fs::create_dir_all(versions.join("2026.08.01-aaaa1111")).unwrap();
@@ -191,6 +193,10 @@ mod tests {
         assert_eq!(direct.env.iter().find(|(k, _)| k == "CURSOR_INVOKED_AS").map(|(_, v)| v.as_str()), Some("cursor-agent.cmd"));
         assert!(direct.env.iter().any(|(k, _)| k == "NODE_COMPILE_CACHE"));
         let _ = std::fs::remove_dir_all(root);
+        match _orig {
+            Some(val) => unsafe { std::env::set_var("LOCALAPPDATA", val); },
+            None => unsafe { std::env::remove_var("LOCALAPPDATA"); },
+        }
     }
 
     #[test]

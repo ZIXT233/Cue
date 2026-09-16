@@ -103,6 +103,15 @@ pub fn run() {
             // (must happen before the first local pty spawn).
             crate::conpty::preload(resource_dir.as_deref());
             let state = build_state(resource_dir);
+            // Hook plugins are only installed when a card of that kind launches, so a
+            // build with a new ingress script leaves the kinds this machine no longer
+            // launches on the old one — silently, since the provider's config keeps
+            // pointing at the same path. Align them here: at most one small write each.
+            let aligned = crate::harness::sync_installed_hooks(&state.bin_dir, &crate::paths::plugins_dir());
+            crate::harness::deploy_external_hooks(&state.bin_dir, &crate::paths::plugins_dir());
+            if !aligned.is_empty() {
+                crate::debuglog::info("hooks", &format!("plugin hooks realigned: {}", aligned.join(", ")));
+            }
             app.manage(state.terminals.clone());
             let port = tauri::async_runtime::block_on(start_server(state)).map_err(|e| e.to_string())?;
             app.manage(ApiPort(Mutex::new(port)));

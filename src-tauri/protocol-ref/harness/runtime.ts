@@ -10,8 +10,7 @@ import { readTerminalTranscript } from "../terminal-transcript";
 import { codexSessionTitle, resolveCodexSessionPrefix, codexSessionExists } from "./codex-title";
 import { readdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
-import { observeHook, observeTitle, type ProbeState, type HookSignal } from "./signals";
-import { normalizeHookSignal } from "./hook-contract";
+import { observeHook, observeTitle, settleHeld, type ProbeState, type HookSignal } from "./signals";
 import { notifyQueueChanged } from "../card-queue-live";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -103,7 +102,7 @@ export async function launchHarness(kind: unknown, workspace: QueueWorkspace, re
   const observeRemote = createHookOscProbe(terminalId, signal => {
     const current = states.get(terminalId);
     if (!current || adapter.id === "shell") return;
-    const next = observeHook(current, normalizeHookSignal(signal));
+    const next = observeHook(current, signal);
     states.set(terminalId, next);
     if (next.state !== current.state || next.hookSeen !== current.hookSeen) notifyQueueChanged("hook");
   });
@@ -152,13 +151,20 @@ export async function harnessSnapshot(session: HarnessSession): Promise<HarnessS
       const files = (await readdir(directory)).filter(name => /^\d+-[a-f0-9-]+\.json$/.test(name)).sort().slice(0, 200);
       for (const file of files) {
         try {
-          const signal = normalizeHookSignal(JSON.parse(await readFile(join(directory, file), "utf8")) as HookSignal);
+          const signal = JSON.parse(await readFile(join(directory, file), "utf8")) as HookSignal;
           current = observeHook(states.get(session.terminalId) ?? current, signal);
           states.set(session.terminalId, current);
         } catch { /* Malformed probe input cannot interrupt the queue. */ }
         await unlink(join(directory, file)).catch(() => {});
       }
       current = states.get(session.terminalId) ?? current;
+      // A held guess has no hook left to promote it, and the snapshot is this
+      // runtime's only clock.
+      const settled = current ? settleHeld(current, Date.now()) : undefined;
+      if (settled) {
+        current = settled;
+        states.set(session.terminalId, settled);
+      }
     } catch { /* Remote title-only probe, or retired launch. */ }
   }
   let providerSessionId = current?.sessionId ?? session.providerSessionId;

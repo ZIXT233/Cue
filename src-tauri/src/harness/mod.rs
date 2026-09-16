@@ -1,4 +1,5 @@
 mod adapters;
+pub(crate) mod antigravity_session;
 mod codex;
 pub(crate) mod codex_session;
 pub(crate) mod codebuddy_session;
@@ -15,6 +16,7 @@ mod env;
 mod external;
 mod hooks;
 mod inherited;
+mod install;
 mod notify_osc;
 mod osc;
 mod shell;
@@ -28,10 +30,10 @@ pub use debug::HarnessDebugSnapshot;
 pub use session_label::session_exists;
 pub use env::local_environment;
 pub use external::ExternalRuntime;
-pub use hooks::prepare_hook_launch;
+pub use hooks::{deploy_external_hooks, prepare_hook_launch, sync_installed_hooks};
 pub use osc::HookOscProbe;
 pub use shell::prepare_shell;
-pub use signals::{observe_hook, observe_title, HookSignal, ProbeState};
+pub use signals::{observe_hook, observe_title, settle_held, HookSignal, ProbeState};
 pub use windows::windows_command;
 
 use crate::error::{AppError, AppResult};
@@ -708,11 +710,44 @@ fn start_signal_watch(
             if apply_file_signals(&probes, &debug_log, &terminals, &id) {
                 changed = true;
             }
+            if promote_held(&probes, &debug_log, &id) {
+                changed = true;
+            }
         }
         if changed {
             live.notify("hook");
         }
     });
+}
+
+/// Raise the guessed asks whose window has run out.
+///
+/// Nothing else will: the point of a hold is that no further hook is coming. Ticking
+/// here keeps it on the same clock as the file signals, so a card is only promoted
+/// while its probe is still alive.
+fn promote_held(
+    probes: &Mutex<HashMap<String, ProbeState>>,
+    debug_log: &debug::DebugLog,
+    terminal_id: &str,
+) -> bool {
+    let now = now_ms();
+    let mut map = probes.lock();
+    let Some(current) = map.get(terminal_id).cloned() else { return false };
+    let Some(next) = settle_held(current.clone(), now) else { return false };
+    let held_for = current.held_attention_at.map(|at| now - at).unwrap_or(0);
+    let tool = current.held_tool.clone().unwrap_or_else(|| "-".into());
+    debug::record(debug_log, terminal_id, debug::HarnessDebugEvent {
+        at: now,
+        source: "hook".into(),
+        event: "HeldAsk".into(),
+        state: next.state.clone(),
+        session_id: next.session_id.clone(),
+        prompt: None,
+        note: Some(format!("held {held_for}ms tool={tool}")),
+    });
+    note_state(terminal_id, "hook", "HeldAsk", &current.state, &next.state);
+    map.insert(terminal_id.to_string(), next);
+    true
 }
 
 #[cfg(test)]

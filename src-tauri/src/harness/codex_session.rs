@@ -186,6 +186,109 @@ pub fn codex_session_exists(id: &str) -> Option<bool> {
     Some(locate_rollout(id).is_some())
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct CodexSessionDetails {
+    pub title: Option<String>,
+    pub cwd: Option<String>,
+    pub prompt: Option<String>,
+    pub reply: Option<String>,
+    pub turns: Vec<crate::models::ExternalTurn>,
+}
+
+fn extract_rollout_text(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(s) => {
+            let t = s.trim();
+            if t.is_empty() { None } else { Some(t.to_string()) }
+        }
+        serde_json::Value::Array(items) => {
+            let mut parts = Vec::new();
+            for item in items {
+                if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
+                    let trimmed = text.trim();
+                    if !trimmed.is_empty() {
+                        parts.push(trimmed.to_string());
+                    }
+                } else if let Some(text) = extract_rollout_text(item) {
+                    parts.push(text);
+                }
+            }
+            if parts.is_empty() { None } else { Some(parts.join("\n\n")) }
+        }
+        serde_json::Value::Object(map) => {
+            if let Some(text) = map.get("text").and_then(|v| v.as_str()) {
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    return Some(trimmed.to_string());
+                }
+            }
+            if let Some(content) = map.get("content") {
+                return extract_rollout_text(content);
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+pub fn codex_session_details(session_id: &str) -> Option<CodexSessionDetails> {
+    let path = locate_rollout(session_id)?;
+    let body = std::fs::read_to_string(path).ok()?;
+    let mut cwd = None;
+    let mut turns = Vec::new();
+    let mut last_user = None;
+    let mut last_assistant = None;
+
+    for line in body.lines() {
+        let Ok(entry) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        let entry_type = entry.get("type").and_then(|v| v.as_str());
+        if entry_type == Some("session_meta") {
+            if let Some(payload) = entry.get("payload") {
+                if let Some(c) = payload.get("cwd").and_then(|v| v.as_str()) {
+                    cwd = Some(c.to_string());
+                }
+            } else if let Some(c) = entry.get("cwd").and_then(|v| v.as_str()) {
+                cwd = Some(c.to_string());
+            }
+            continue;
+        }
+        if entry_type == Some("response_item") {
+            let Some(payload) = entry.get("payload") else { continue };
+            let Some(role) = payload.get("role").and_then(|v| v.as_str()) else { continue };
+            if role != "user" && role != "assistant" {
+                continue;
+            }
+            let raw_content = payload.get("content").unwrap_or(payload);
+            let text = extract_rollout_text(raw_content);
+            let Some(text) = text else { continue };
+            if role == "user" {
+                if super::label_text::is_noise(&text) {
+                    continue;
+                }
+                last_user = Some(text.clone());
+                turns.push(crate::models::ExternalTurn {
+                    role: "user".into(),
+                    text,
+                });
+            } else if role == "assistant" {
+                last_assistant = Some(text.clone());
+                turns.push(crate::models::ExternalTurn {
+                    role: "assistant".into(),
+                    text,
+                });
+            }
+        }
+    }
+
+    Some(CodexSessionDetails {
+        title: codex_session_title(session_id),
+        cwd,
+        prompt: last_user,
+        reply: last_assistant,
+        turns,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

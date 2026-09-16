@@ -2,9 +2,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-// Lifecycle boundaries follow Orca's OpenCode status plugin; see docs/harness/opencode.
+// Lifecycle boundaries follow Orca's OpenCode status plugin; see docs/harness/hook-api.md.
 export const CueState = async ({ client }) => {
   const sessions = new Map();
+  const prompted = new Set();
+  // OpenCode auto-titles sessions via the provider's small model. When that
+  // never lands (custom providers, offline proxies) the title stays at the
+  // "New session - <timestamp>" placeholder; treat it as absent so the card
+  // falls back to the captured prompt.
+  const DEFAULT_TITLE = /^(?:New session|Child session) - \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
   let owner = process.env.CUE_HARNESS_SESSION_ID;
   let sequence = Promise.resolve();
   let lastSignalAt = 0;
@@ -12,22 +18,28 @@ export const CueState = async ({ client }) => {
 
   const emit = (event, info, extra = {}) => {
     try {
+      const title = typeof info.title === 'string' && !DEFAULT_TITLE.test(info.title)
+        ? info.title.slice(0, 160)
+        : undefined;
       const signal = {
         kind: 'opencode',
         at: (lastSignalAt = Math.max(Date.now(), lastSignalAt + 1)),
         event,
         sessionId: info.id,
-        title: typeof info.title === 'string' ? info.title.slice(0, 160) : undefined,
+        title,
         ...extra,
       };
       const token = process.env.CUE_HARNESS_CHANNEL;
+      const extDir = path.join(process.env.HOME || process.env.USERPROFILE || '', '.cue', 'external-signals');
+      const dir = process.env.CUE_HARNESS_SIGNAL_DIR || extDir;
       if (token) {
         fs.writeFileSync(
           process.env.CUE_HARNESS_TTY || '/dev/tty',
           `\x1b]777;cue;${Buffer.from(JSON.stringify({ token, signal })).toString('base64')}\x07`,
         );
-      } else if (process.env.CUE_HARNESS_SIGNAL_DIR) {
-        const file = path.join(process.env.CUE_HARNESS_SIGNAL_DIR, `${signal.at}-${randomUUID()}.json`);
+      } else if (dir) {
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+        const file = path.join(dir, `${signal.at}-${randomUUID()}.json`);
         fs.writeFileSync(`${file}.tmp`, JSON.stringify(signal), { mode: 0o600 });
         fs.renameSync(`${file}.tmp`, file);
       }
@@ -73,6 +85,17 @@ export const CueState = async ({ client }) => {
     return text ? text.slice(0, 160) : undefined;
   }
 
+  function promptText(output) {
+    const parts = output?.parts ?? output?.message?.parts ?? output?.message?.content;
+    if (typeof parts === 'string') return previewText(parts);
+    if (!Array.isArray(parts)) return undefined;
+    const text = parts
+      .map(part => (typeof part === 'string' ? part : part?.type === 'text' ? part.text : ''))
+      .filter(Boolean)
+      .join(' ');
+    return previewText(text);
+  }
+
   async function replyPreview(sessionId) {
     if (!client?.session?.messages) return undefined;
     const signal = typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(1500) : undefined;
@@ -105,13 +128,19 @@ export const CueState = async ({ client }) => {
   }
 
   return {
-    'chat.message': (input) => enqueue(async () => {
+    'chat.message': (input, output) => enqueue(async () => {
       const sessionID = input?.sessionID || input?.sessionId;
       if (!sessionID) return;
       const info = await resolve(sessionID);
       if (isChild(info)) return;
       owner = info.id;
-      emit('UserPromptSubmit', info);
+      const prompt = promptText(output);
+      const first = !!prompt && !prompted.has(info.id);
+      if (prompt) {
+        prompted.add(info.id);
+        if (prompted.size >= 512) prompted.delete(prompted.keys().next().value);
+      }
+      emit('UserPromptSubmit', info, first ? { prompt, firstPrompt: prompt } : { prompt });
     }),
     event: ({ event }) => {
       // Serialize async identity lookups so older idle events cannot pass newer busy events.

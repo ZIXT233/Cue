@@ -13,7 +13,8 @@ export const harnessCatalog: { id: HarnessId; name: string; description: string;
   { id: "shell", name: "Shell", description: "手动放入工作区，命令完成通知；不接入 Harness 通知探针" },
 ];
 export const harnessPicker = harnessCatalog.filter(item => !item.hidden);
-export const harnessName = (id: HarnessId) => harnessCatalog.find(item => item.id === id)?.name ?? id;
+/** Accepts any id, so an external notice can name a CLI that is not in the picker. */
+export const harnessName = (id: HarnessId | string) => harnessCatalog.find(item => item.id === id)?.name ?? id;
 
 const PROVIDER_ICON_IDS: Record<string, string> = { codex: "openai", claude: "anthropic", gemini: "google", antigravity: "google" };
 export const providerIconId = (id: string) => PROVIDER_ICON_IDS[id] ?? id;

@@ -945,10 +945,14 @@ mod tests {
     }
 
     async fn start_server() -> (Target, Arc<Mutex<Recorded>>) {
-        let port = {
-            let probe = TcpListener::bind("127.0.0.1:0").await.expect("probe a free port");
-            probe.local_addr().expect("probe address").port()
-        };
+        // Bind the socket here and hand the listener to the server, rather than probing
+        // a free port and letting the server bind that number again. The probe only
+        // reserves the port until it is dropped, and the connect below then races the
+        // server's own bind: when it wins, the connection is refused and the test
+        // reports that instead of the reason for it. A listener bound before the spawn
+        // is already accepting, so there is no window to lose.
+        let socket = TcpListener::bind("127.0.0.1:0").await.expect("bind a test port");
+        let port = socket.local_addr().expect("test address").port();
         let config = Arc::new(russh::server::Config {
             keys: vec![russh::keys::PrivateKey::from_openssh(HOST_KEY).expect("test host key")],
             // Keep the default auth rejection delay out of the test's critical path.
@@ -959,7 +963,11 @@ mod tests {
         let recorded = Arc::new(Mutex::new(Recorded::default()));
         let mut server = TestServer { recorded: recorded.clone(), id: 0 };
         tokio::spawn(async move {
-            let _ = server.run_on_address(config, ("127.0.0.1", port)).await;
+            // A swallowed error here is what made a refused connection look like an
+            // environment problem: say why the server stopped.
+            if let Err(error) = server.run_on_socket(config, &socket).await {
+                eprintln!("test ssh server stopped: {error}");
+            }
         });
         let target = Target {
             id: format!("cue-test-{port}"),
