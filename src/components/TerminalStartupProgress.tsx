@@ -22,7 +22,7 @@ const STAGE_ORDER: Record<TerminalStartupStage, number> = {
   preparing: 1,
   connecting: 2,
   waiting_output: 3,
-  ready: 4,
+  ready: 3,
   error: -1,
 };
 
@@ -89,18 +89,15 @@ export function TerminalStartupProgress({
     {
       step: 3,
       title: t("terminal.progress.step3"),
-      desc: t("terminal.progress.step3Desc"),
-    },
-    {
-      step: 4,
-      title: t("terminal.progress.step4"),
-      desc: t("terminal.progress.step4Desc"),
+      desc: stage === "ready" ? t("terminal.progress.step4Desc") : t("terminal.progress.step3Desc"),
     },
   ];
 
   const activeDesc = stage === "error"
     ? (error || t("terminal.progress.failed"))
-    : steps[Math.min(3, Math.max(0, currentStep - 1))].desc;
+    : stage === "ready"
+    ? t("terminal.progress.step4Desc")
+    : steps[Math.min(2, Math.max(0, currentStep - 1))].desc;
 
   const displayName = harnessName || (harnessKind ? harnessKind.toUpperCase() : t("terminal.title"));
 
