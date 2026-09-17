@@ -2,7 +2,7 @@
 //! its own title tiers — that happens to share Claude's plugin layout and transcript
 //! format. It used to ride in on Claude's registry default; it is spelled out here.
 
-use super::claude::{claude_session_details, family_plan, EVENTS};
+use super::claude::{family_plan, EVENTS};
 use super::registry::{resume_flag, Adapter, Ctx, GlobalCtx, Harness, Plan};
 use super::label_text::{clip, json_text, SessionLabel};
 use super::session_find::{find_first, safe_name_id};
@@ -51,16 +51,8 @@ impl Harness for CodeBuddy {
     fn session_label(&self, id: &str, _need_first_prompt: bool) -> Option<SessionLabel> {
         Some(session_label(id))
     }
-    /// CodeBuddy keeps Claude's transcript format, so the conversation reads from the
-    /// one store even though the title tiers are its own.
     fn session_details(&self, id: &str) -> Option<SessionFacts> {
-        claude_session_details(id).map(|details| SessionFacts {
-            name: details.title,
-            cwd: details.cwd,
-            prompt: details.prompt,
-            reply: details.reply,
-            turns: details.turns,
-        })
+        codebuddy_session_details(id)
     }
 }
 
@@ -188,6 +180,123 @@ fn is_real_user_message(entry: &serde_json::Value) -> bool {
     kind == Some("user") && entry.get("isMeta") != Some(&serde_json::Value::Bool(true))
 }
 
+fn extract_turn_text(raw_msg: &serde_json::Value) -> String {
+    match raw_msg {
+        serde_json::Value::String(s) => s.trim().to_string(),
+        serde_json::Value::Object(o) => {
+            if let Some(s) = o.get("content").and_then(|c| c.as_str()) {
+                s.trim().to_string()
+            } else if let Some(parts) = o.get("content").and_then(|c| c.as_array()) {
+                let mut joined = Vec::new();
+                for part in parts {
+                    if let Some(t) = part.get("text").and_then(|t| t.as_str()) {
+                        joined.push(t.trim().to_string());
+                    }
+                }
+                joined.join("\n\n")
+            } else {
+                json_text(raw_msg).unwrap_or_default()
+            }
+        }
+        serde_json::Value::Array(parts) => {
+            let mut joined = Vec::new();
+            for part in parts {
+                if let Some(t) = part.get("text").and_then(|t| t.as_str()) {
+                    joined.push(t.trim().to_string());
+                }
+            }
+            if joined.is_empty() {
+                json_text(raw_msg).unwrap_or_default()
+            } else {
+                joined.join("\n\n")
+            }
+        }
+        _ => json_text(raw_msg).unwrap_or_default(),
+    }
+}
+
+pub(super) fn parse_codebuddy_details(body: &str, label: SessionLabel) -> SessionFacts {
+    let mut turns = Vec::new();
+    let mut last_user = None;
+    let mut last_assistant = None;
+    let mut session_cwd = None;
+
+    for line in body.lines() {
+        let Ok(entry) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        if session_cwd.is_none() {
+            if let Some(c) = entry.get("cwd").and_then(|v| v.as_str()) {
+                session_cwd = Some(c.to_string());
+            }
+        }
+        let kind = entry.get("type").and_then(|v| v.as_str());
+        if kind == Some("message") {
+            let role = entry.get("role").and_then(|v| v.as_str());
+            let raw_msg = entry.get("content").or_else(|| entry.get("message"));
+            let text = raw_msg.map(extract_turn_text).unwrap_or_default();
+            if text.is_empty() || super::label_text::is_noise(&text) {
+                continue;
+            }
+            if role == Some("user") {
+                if !is_real_user_message(&entry) {
+                    continue;
+                }
+                last_user = Some(text.clone());
+                turns.push(crate::models::ExternalTurn {
+                    role: "user".into(),
+                    text,
+                });
+            } else if role == Some("assistant") {
+                last_assistant = Some(text.clone());
+                turns.push(crate::models::ExternalTurn {
+                    role: "assistant".into(),
+                    text,
+                });
+            }
+        } else {
+            // Claude-compatible format
+            if entry.get("isMeta") == Some(&serde_json::Value::Bool(true)) {
+                continue;
+            }
+            let Some(raw_msg) = entry.get("message") else { continue };
+            let text = extract_turn_text(raw_msg);
+            if text.is_empty() || super::label_text::is_noise(&text) {
+                continue;
+            }
+            if kind == Some("user") {
+                last_user = Some(text.clone());
+                turns.push(crate::models::ExternalTurn {
+                    role: "user".into(),
+                    text,
+                });
+            } else if kind == Some("assistant") {
+                last_assistant = Some(text.clone());
+                turns.push(crate::models::ExternalTurn {
+                    role: "assistant".into(),
+                    text,
+                });
+            }
+        }
+    }
+
+    SessionFacts {
+        name: label.name,
+        cwd: session_cwd,
+        prompt: last_user.or(label.first_prompt),
+        reply: last_assistant,
+        turns,
+    }
+}
+
+pub(super) fn codebuddy_session_details(session_id: &str) -> Option<SessionFacts> {
+    if !safe_name_id(session_id) {
+        return None;
+    }
+    let label = session_label(session_id);
+    let path = transcript_path(session_id)?;
+    let body = std::fs::read_to_string(path).ok()?;
+    Some(parse_codebuddy_details(&body, label))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,4 +383,25 @@ mod tests {
         assert!(!session_exists("../etc/passwd"));
         assert_eq!(session_label("a/b"), SessionLabel::default());
     }
+
+    #[test]
+    fn reads_codebuddy_details_with_turns_and_reply() {
+        let body = r#"
+{"id":"a1","timestamp":"2026-09-16T01:00:00.000Z","type":"message","role":"user","content":[{"type":"input_text","text":"实现一个红黑树"}],"sessionId":"01a0a62a","cwd":"/Users/zixt/projects/trees"}
+{"type":"summary","summary":"用户打了个招呼","providerData":{"source":"initial-user-message"}}
+{"type":"message","role":"assistant","content":[{"type":"output_text","text":"这是红黑树的实现代码。"}],"message":{"usage":{"input_tokens":1}}}
+"#;
+        let label = SessionLabel { name: Some("红黑树".into()), first_prompt: Some("实现一个红黑树".into()) };
+        let facts = parse_codebuddy_details(body, label);
+        assert_eq!(facts.name.as_deref(), Some("红黑树"));
+        assert_eq!(facts.cwd.as_deref(), Some("/Users/zixt/projects/trees"));
+        assert_eq!(facts.prompt.as_deref(), Some("实现一个红黑树"));
+        assert_eq!(facts.reply.as_deref(), Some("这是红黑树的实现代码。"));
+        assert_eq!(facts.turns.len(), 2);
+        assert_eq!(facts.turns[0].role, "user");
+        assert_eq!(facts.turns[0].text, "实现一个红黑树");
+        assert_eq!(facts.turns[1].role, "assistant");
+        assert_eq!(facts.turns[1].text, "这是红黑树的实现代码。");
+    }
 }
+

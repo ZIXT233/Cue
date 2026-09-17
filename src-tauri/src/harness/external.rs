@@ -38,6 +38,47 @@ fn signal_kind(signal: &HookSignal) -> String {
     signal.kind.clone().unwrap_or_else(|| "cursor".into())
 }
 
+/// Resolves the true harness kind for an incoming hook signal.
+///
+/// Third-party runners (like Cursor reading Claude hooks in `~/.claude/settings.json`)
+/// may invoke an ingress plugin for a different harness ("claude"). We verify ownership
+/// against disk session stores and protect already-identified notices from downgrade.
+fn resolve_signal_kind(signal: &HookSignal, existing_kind: Option<&str>) -> String {
+    let raw_kind = signal_kind(signal);
+
+    // If we have a concrete session id, check ground-truth disk existence across candidate harnesses.
+    if let Some(id) = signal.session_id.as_deref().filter(|s| !s.is_empty()) {
+        if raw_kind == "claude" {
+            if session_label::session_exists("claude", id) == Some(true) {
+                return "claude".into();
+            }
+            if session_label::session_exists("cursor", id) == Some(true) {
+                return "cursor".into();
+            }
+            if session_label::session_exists("codebuddy", id) == Some(true) {
+                return "codebuddy".into();
+            }
+        } else if raw_kind == "codebuddy" {
+            if session_label::session_exists("codebuddy", id) == Some(true) {
+                return "codebuddy".into();
+            }
+            if session_label::session_exists("cursor", id) == Some(true) {
+                return "cursor".into();
+            }
+        }
+    }
+
+    // If disk check is inconclusive, protect an existing verified notice (e.g. "cursor")
+    // from being downgraded by an incoming "claude" signal for the same session or path key.
+    if let Some(existing) = existing_kind {
+        if raw_kind == "claude" && existing != "claude" {
+            return existing.to_string();
+        }
+    }
+
+    raw_kind
+}
+
 struct Tracked {
     notice: ExternalNotice,
     /// Last event from this session whatever its state, so an uninterrupted
@@ -167,17 +208,20 @@ fn apply_with_settings(
     if signal.agent_id.is_some() || now - signal.at > SIGNAL_MAX_AGE_MS {
         return false;
     }
-    let kind = signal_kind(&signal);
+    let Some(key) = notice_key(&signal) else { return false };
+    let existing_kind = notices.lock().get(&key).map(|tracked| tracked.notice.kind.clone());
+    let kind = resolve_signal_kind(&signal, existing_kind.as_deref());
     if let Some(check) = is_enabled {
         if !check(&kind) {
             return false;
         }
     }
-    let Some(key) = notice_key(&signal) else { return false };
     let state = {
         let mut map = probes.lock();
         let current = map.get(&key).cloned().unwrap_or_default();
-        let next = observe_hook(current, signal.clone());
+        let mut resolved_signal = signal.clone();
+        resolved_signal.kind = Some(kind.clone());
+        let next = observe_hook(current, resolved_signal);
         let state = next.state.clone();
         map.insert(key.clone(), next);
         state
@@ -190,7 +234,7 @@ fn apply_with_settings(
     // Going back to work is not a retraction: the session keeps a background entry, so
     // the sidebar can show what is running out there as well as who wants the user.
     if state == "working" {
-        return set_working(&notices, &key, &signal, now);
+        return set_working(notices, &key, &signal, &kind, now);
     }
     if state != "attention" {
         let mut map = notices.lock();
@@ -202,7 +246,6 @@ fn apply_with_settings(
     // Reading the session's own files costs disk work, and the notices lock is read on
     // every snapshot, so it is never held across it. Everything that decides whether
     // this ask is still wanted happens below, under one lock, as it did before.
-    let kind = signal_kind(&signal);
     let facts = session_facts(&kind, signal.session_id.as_deref());
     let mut map = notices.lock();
     // A hand-dismissed notice stays down until this session asks something newer;
@@ -282,11 +325,17 @@ fn promote_held_asks(
 /// Track a session that is working. An entry that already exists keeps its identity and
 /// only loses what belonged to the previous ask; a session seen working for the first
 /// time is described by the hook payload alone, because nothing has asked anything yet.
-fn set_working(notices: &Mutex<HashMap<String, Tracked>>, key: &str, signal: &HookSignal, now: i64) -> bool {
+fn set_working(
+    notices: &Mutex<HashMap<String, Tracked>>,
+    key: &str,
+    signal: &HookSignal,
+    kind: &str,
+    now: i64,
+) -> bool {
     let mut map = notices.lock();
     let mut notice = map.get(key).map(|tracked| tracked.notice.clone()).unwrap_or_else(|| ExternalNotice {
         id: key.to_string(),
-        kind: signal_kind(signal),
+        kind: kind.to_string(),
         session_id: signal.session_id.clone(),
         project: signal.workspace_root.as_deref().and_then(project_name),
         cwd: signal.workspace_root.clone(),
@@ -299,6 +348,7 @@ fn set_working(notices: &Mutex<HashMap<String, Tracked>>, key: &str, signal: &Ho
         tool: None,
         at: signal.at,
     });
+    notice.kind = kind.to_string();
     notice.state = "working".into();
     notice.at = signal.at;
     // The wait is over, so what described it goes. The ask and the conversation stay:
@@ -659,4 +709,34 @@ mod tests {
         assert!(apply_with_settings(&probes, &notices, sig2, Some(&enabled_cursor)));
         assert_eq!(notices.lock().len(), 1);
     }
+
+    #[test]
+    fn existing_cursor_notice_is_not_overwritten_by_unverified_claude_signal() {
+        let (probes, notices) = store();
+        let at = now();
+        let mut cursor_sig = signal("stop", at);
+        cursor_sig.kind = Some("cursor".into());
+        assert!(apply(&probes, &notices, cursor_sig));
+        assert_eq!(only(&notices).kind, "cursor");
+
+        // An unverified claude signal for the same session must not downgrade kind to claude.
+        let mut claude_sig = signal("stop", at + 1);
+        claude_sig.kind = Some("claude".into());
+        assert!(apply(&probes, &notices, claude_sig));
+        assert_eq!(only(&notices).kind, "cursor");
+    }
+
+    #[test]
+    fn resolve_signal_kind_protects_existing_non_claude_kind() {
+        let sig = HookSignal {
+            kind: Some("claude".into()),
+            session_id: Some(SESSION.into()),
+            ..HookSignal::default()
+        };
+        // SESSION has no files on disk. If existing is cursor, it preserves cursor.
+        assert_eq!(resolve_signal_kind(&sig, Some("cursor")), "cursor");
+        // If no existing kind and no disk files, it falls back to raw kind.
+        assert_eq!(resolve_signal_kind(&sig, None), "claude");
+    }
 }
+

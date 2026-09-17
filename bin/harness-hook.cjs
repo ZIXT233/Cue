@@ -18,6 +18,7 @@ if (hpIdx >= 0 && parts[hpIdx + 1]) {
   inferredKind = parts[hpIdx + 1];
 }
 const kind = process.env.QUE_HARNESS_KIND || inferredKind || (cursorEvents.has(explicitEvent) ? 'cursor' : undefined);
+let effectiveKind = kind;
 const token = process.env.QUE_HARNESS_CHANNEL;
 const envDirectory = process.env.QUE_HARNESS_SIGNAL_DIR;
 const activePath = path.join(__dirname, 'active.json');
@@ -45,7 +46,7 @@ function finish() {
   if (finished) return;
   finished = true;
   clearTimeout(timer);
-  if (kind === 'cursor') process.stdout.write(JSON.stringify(cursorReply(explicitEvent)) + '\n');
+  if (effectiveKind === 'cursor') process.stdout.write(JSON.stringify(cursorReply(explicitEvent)) + '\n');
   process.exit(0);
 }
 process.stdin.setEncoding('utf8');
@@ -115,8 +116,20 @@ function consume() {
     // the contract has no name for (agy's "this Stop is not a turn end") travels as a
     // field, so a reader can always see what was really reported.
     const fullyIdle = payload.fullyIdle ?? payload.fully_idle;
+    const isCursorEnv = Boolean(
+      process.env.CURSOR_AGENT ||
+      process.env.CURSOR_CHANNEL ||
+      process.env.CURSOR_INVOKED_AS ||
+      process.env.CURSOR_VERSION ||
+      process.env.CURSOR_PROJECT_DIR ||
+      process.env.CURSOR_TRACE_ID
+    );
+    const isCursorPayload = Boolean(payload.conversationId || payload.conversation_id) && !payload.transcript_path && !payload.hook_event_name;
+    if ((kind === 'claude' || kind === 'codebuddy') && (isCursorEnv || isCursorPayload)) {
+      effectiveKind = 'cursor';
+    }
     const text = value => typeof value === 'string' ? value.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 160) : undefined;
-    const directory = envDirectory || externalPath || (kind === 'cursor' ? undefined : legacyActiveDirectory());
+    const directory = envDirectory || externalPath || (effectiveKind === 'cursor' ? undefined : legacyActiveDirectory());
     const external = externalPath !== undefined && directory === externalPath;
     // A card preview only has to hint at the reply; an external notice is the only
     // place that reply will ever be read, so keep its line breaks and its length.
@@ -124,7 +137,7 @@ function consume() {
       ? value.replace(/\r\n?/g, '\n').replace(/[^\S\n]+/g, ' ').replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '').trim().slice(0, 2000)
       : undefined;
     const completion = eventName === 'afterAgentResponse' || ['Stop', 'stop', 'AfterAgent'].includes(eventName);
-    const event = { kind, at, event: eventName, fullyIdle: typeof fullyIdle === 'boolean' ? fullyIdle : undefined, replyPreview: completion ? (external ? externalReply(replyText(payload)) : text(replyText(payload))) : undefined, sessionId: payload.conversationId || payload.conversation_id || payload.session_id || payload.sessionId,
+    const event = { kind: effectiveKind, at, event: eventName, fullyIdle: typeof fullyIdle === 'boolean' ? fullyIdle : undefined, replyPreview: completion ? (external ? externalReply(replyText(payload)) : text(replyText(payload))) : undefined, sessionId: payload.conversationId || payload.conversation_id || payload.session_id || payload.sessionId,
       agentId: payload.agent_id || payload.agentId, tool: payload.toolCall?.name ?? payload.tool_name ?? payload.toolName ?? payload.name,
       notification: payload.notification_type ?? payload.notificationType ?? payload.type,
       prompt: ['UserPromptSubmit', 'beforeSubmitPrompt', 'BeforeAgent'].includes(eventName) ? text(payload.prompt) : undefined };
