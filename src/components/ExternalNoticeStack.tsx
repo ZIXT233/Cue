@@ -4,7 +4,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { copyText } from "@/lib/clipboard";
 import { externalNoticeTitle, type ExternalNotice, type ExternalTurn } from "@/lib/card-queue";
-import { harnessName, providerIconId } from "@/lib/harness/catalog";
+import { harnessName, isPiMark, providerIconId } from "@/lib/harness/catalog";
 import { Icon } from "./QueueIcon";
 import { ScoreChipTooltip } from "./ScoreChipTooltip";
 import { WorkspaceMachineIcon } from "./WorkspaceMachineIcon";
@@ -22,7 +22,7 @@ function ExternalHarnessWatermark({ kind }: { kind: string }) {
       </div>
     );
   }
-  if (kind === "pi" || kind === "omp") {
+  if (isPiMark(kind)) {
     return (
       <div className="cq-external-watermark" data-harness={kind} aria-hidden="true">
         <span className="cq-external-watermark-pi">π</span>
@@ -50,7 +50,7 @@ function ExternalHarnessHeaderBadge({ kind, title }: { kind: string; title: stri
       </div>
     );
   }
-  if (kind === "pi" || kind === "omp") {
+  if (isPiMark(kind)) {
     return (
       <div className="cq-external-header-badge" data-harness={kind} title={title} aria-label={title}>
         <span className="cq-external-header-badge-pi">π</span>
@@ -67,7 +67,7 @@ function ExternalHarnessHeaderBadge({ kind, title }: { kind: string; title: stri
 }
 
 /**
- * A card for an attention call from a session Cue never launched. Cursor's user-level
+ * A card for an attention call from a session Que never launched. Cursor's user-level
  * hooks are global, so IDE chats and other terminals report here too. It rides the
  * deck like any other card, so it reuses the queue card's shell, header, chips and
  * actions; the body is the only thing it owns, because there is no terminal behind it

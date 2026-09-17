@@ -1,25 +1,17 @@
 //! OpenCode: an in-process plugin, named by an environment variable that carries the
 //! whole config — including whatever the user already had.
 
-use super::{Adapter, Ctx, GlobalCtx, Plan};
+use super::registry::{checked_id, Adapter, Ctx, GlobalCtx, Harness, Plan};
+use super::inherited::inherited_config;
 use crate::error::AppResult;
-use crate::harness::inherited::inherited_config;
-
-pub(crate) fn harness(id: &str) -> Option<Adapter> {
-    if id != "opencode" { return None; }
-    Some(Adapter { id: "opencode", executable: "opencode", args: &[], resume: resume_args })
-}
+use std::future::Future;
+use std::pin::Pin;
 
 fn resume_args(session_id: &str) -> AppResult<Vec<String>> {
-    Ok(vec!["--session".into(), super::checked_id(session_id)?.into()])
+    Ok(vec!["--session".into(), checked_id(session_id)?.into()])
 }
 
-/// OpenCode has no hook files: a session Cue never launched only needs the plugin itself.
-pub(crate) fn global(ctx: &GlobalCtx) {
-    let _ = ctx.install_plugin("opencode", "harness-opencode.mjs", "opencode-plugin.mjs");
-}
-
-pub(super) async fn plan(ctx: &Ctx<'_>) -> AppResult<Plan> {
+async fn plan(ctx: Ctx<'_>) -> AppResult<Plan> {
     let mut plan = Plan::default();
     plan.files.insert("opencode-plugin.mjs".into(), std::fs::read_to_string(ctx.bin_dir.join("harness-opencode.mjs"))?);
     let mut config = inherited_config("opencode", ctx.workspace, &ctx.host.node).await?;
@@ -40,4 +32,40 @@ pub(super) async fn plan(ctx: &Ctx<'_>) -> AppResult<Plan> {
 
 fn encoded(value: &str) -> String {
     url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
+}
+
+pub struct OpenCode;
+
+pub static OPENCODE: OpenCode = OpenCode;
+
+impl Harness for OpenCode {
+    fn id(&self) -> &'static str {
+        "opencode"
+    }
+    fn adapter(&self) -> Option<Adapter> {
+        Some(Adapter::new("opencode", &[], resume_args))
+    }
+
+    fn plan<'a>(&'a self, ctx: Ctx<'a>) -> Pin<Box<dyn Future<Output = AppResult<Plan>> + Send + 'a>> {
+        Box::pin(plan(ctx))
+    }
+
+    /// OpenCode has no hook files: a session Que never launched only needs the plugin itself.
+    fn global(&self, ctx: &GlobalCtx) {
+        let _ = ctx.install_plugin("opencode", "harness-opencode.mjs", "opencode-plugin.mjs");
+    }
+
+    fn extra_search_dirs(&self) -> &'static [&'static str] {
+        &[".opencode/bin"]
+    }
+
+    /// A session name arrives through the stable OSC title alone, so the session files
+    /// have nothing to add.
+    fn refresh_probe_label(&self) -> bool {
+        false
+    }
+
+    fn external_ingress(&self) -> bool {
+        true
+    }
 }

@@ -339,7 +339,7 @@ export function SettingsPanel({ initialSection, onClose }: Props) {
                 <path d="m3 12 9 4.5 9-4.5M3 16.5 12 21l9-4.5" />
               </svg>
             </span>
-            <span><strong>Cue</strong><small className="settings-dialog-title">{t("settings.title")}</small></span>
+            <span><strong>Que</strong><small className="settings-dialog-title">{t("settings.title")}</small></span>
           </div>
           <select aria-label={t("settings.title")} value={section} onChange={(event) => activateSection(event.target.value as SettingsSection)} className="settings-mobile-section-picker">
             {sections.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}

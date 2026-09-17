@@ -95,9 +95,10 @@ pub fn snapshot(
 ) -> HarnessDebugSnapshot {
     let directory = signal_dir(terminal_id);
     let events = log.lock().get(terminal_id).cloned().unwrap_or_default();
-    let probe = probes.lock().get(terminal_id).map(ProbeView::from_state);
+    let state = probes.lock().get(terminal_id).cloned();
+    let probe = state.as_ref().map(ProbeView::from_state);
     let pty = terminals.probe(terminal_id);
-    let clues = clues(probe.as_ref(), pty.as_ref(), &events);
+    let clues = clues(state.as_ref().and_then(|s| s.kind.as_deref()), probe.as_ref(), pty.as_ref(), &events);
     let trace = std::fs::read_to_string(directory.join("hook-trace.jsonl"))
         .ok()
         .map(|raw| {
@@ -126,7 +127,7 @@ pub fn snapshot(
     }
 }
 
-fn clues(probe: Option<&ProbeView>, pty: Option<&PtyProbe>, events: &[HarnessDebugEvent]) -> Vec<String> {
+fn clues(kind: Option<&str>, probe: Option<&ProbeView>, pty: Option<&PtyProbe>, events: &[HarnessDebugEvent]) -> Vec<String> {
     let mut clues = Vec::new();
     let Some(pty) = pty else {
         clues.push("PTY 记录不存在：卡片引用的终端已不在内存里".into());
@@ -183,23 +184,10 @@ fn clues(probe: Option<&ProbeView>, pty: Option<&PtyProbe>, events: &[HarnessDeb
         {
             clues.push("hooks 看到了提交，但没有 stop/afterAgentResponse：CLI 在提交后卡住，不是卡片状态机".into());
         }
-        let looks_cursor = !probe.notify_osc_seen.is_empty()
-            || events.iter().any(|e| {
-                e.source == "notify-osc"
-                    || matches!(e.event.as_str(), "sessionStart" | "beforeSubmitPrompt" | "afterAgentResponse" | "preToolUse")
-            });
-        if looks_cursor && probe.notify_osc_seen.is_empty() && !events.iter().any(|e| e.source == "notify-osc") {
-            if pty.last_focus.as_deref() == Some("focused") {
-                clues.push("流里没见到 OSC 99/9/777，且已向 PTY 写过 CSI I（前台）：Cursor 默认不发桌面通知".into());
-            } else {
-                clues.push("流里没见到 OSC 99/9/777：要么 Cursor 没发，要么探针 panic 把那一段吞了".into());
-            }
-        } else if looks_cursor && !events.iter().any(|e| e.source == "notify-osc" && e.event == "Notification") {
-            clues.push(format!(
-                "流里见到了 {}，但没拼出完整通知（分片未结束或探针崩了）",
-                probe.notify_osc_seen.join("/")
-            ));
-        }
+    }
+    // A harness whose notification channel needs its own heuristics adds them here.
+    if let Some(harness) = kind.and_then(super::registry::find) {
+        harness.debug_clues(probe, Some(pty), events, &mut clues);
     }
     if clues.is_empty() {
         clues.push("后端在送数据。若画面仍缺，看 debug 里的 xterm 字段：sse 计数是否远小于 eventsEmitted".into());

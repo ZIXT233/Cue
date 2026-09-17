@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { mergeQueueSnapshot, QUEUE_SSE_REFRESH_MS, queueFallbackPollMs, queuePollIntervalMs } from "@/lib/card-queue-snapshot";
 import type { CardQueue } from "@/lib/card-queue";
+import { useI18n } from "@/hooks/useI18n";
 
 async function readJsonResponse<T>(response: Response): Promise<T> {
   const body = await response.text();
@@ -12,6 +13,7 @@ async function readJsonResponse<T>(response: Response): Promise<T> {
 }
 
 export function useCardQueue() {
+  const { t } = useI18n();
   const [queue, setQueue] = useState<CardQueue | null>(null);
   const [defaultCwd, setDefaultCwd] = useState("");
   const [error, setError] = useState("");
@@ -44,20 +46,20 @@ export function useCardQueue() {
         const response = await fetch(bootstrap ? "/api/card-queue/bootstrap" : "/api/card-queue", { cache: "no-store", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]) });
         const data = await readJsonResponse<CardQueue & { defaultCwd?: string; error?: string }>(response);
         if (controller.signal.aborted || generation !== localGeneration.current) return;
-        if (!response.ok) throw new Error(data.error || "无法连接 Pi");
+        if (!response.ok) throw new Error(data.error || t("queue.connectFailed"));
         accept(data);
         bootstrapped.current = true;
         if (mounted.current) setError("");
       } catch (error) {
         if (!controller.signal.aborted && mounted.current && generation === localGeneration.current)
-          setError(error instanceof Error && error.name === "TimeoutError" ? "读取卡片队列超时，请重试。" : error instanceof Error ? error.message : String(error));
+          setError(error instanceof Error && error.name === "TimeoutError" ? t("queue.connectTimeout") : error instanceof Error ? error.message : String(error));
       } finally {
         if (request.current === current) request.current = null;
         if (bootstrap && bootstrapped.current && !controller.signal.aborted) void refresh();
       }
     })();
     return current.promise;
-  }, [accept]);
+  }, [accept, t]);
   const act = useCallback(async (action: string, data: Record<string, unknown> = {}) => {
     const generation = localGeneration.current;
     const owner = lifetime.current;

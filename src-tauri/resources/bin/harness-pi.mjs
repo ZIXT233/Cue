@@ -2,21 +2,21 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-// Loaded only by a Cue-owned Pi CLI. No tools, prompts or permission changes.
-export default function cueState(pi) {
+// Loaded only by a Que-owned Pi CLI. No tools, prompts or permission changes.
+export default function queState(pi) {
   function emit(event, ctx, prompt) {
     try {
       const text = value => typeof value === 'string' ? value.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 160) : undefined;
       const messages = event === 'Stop' ? ctx.sessionManager.buildSessionContext().messages : [];
       const last = [...messages].reverse().find(message => message.role === 'assistant');
       const replyPreview = last ? text(typeof last.content === 'string' ? last.content : last.content.filter(block => block.type === 'text').map(block => block.text).join(' ')) : undefined;
-      const kind = process.env.CUE_HARNESS_KIND || 'pi';
+      const kind = process.env.QUE_HARNESS_KIND || 'pi';
       const signal = { kind, replyPreview, at: Date.now(), event, sessionId: ctx.sessionManager.getSessionId(), title: text(ctx.sessionManager.getSessionName()), prompt: text(prompt) };
-      const token = process.env.CUE_HARNESS_CHANNEL;
-      const extDir = path.join(process.env.HOME || process.env.USERPROFILE || '', '.cue', 'external-signals');
-      const dir = process.env.CUE_HARNESS_SIGNAL_DIR || extDir;
+      const token = process.env.QUE_HARNESS_CHANNEL;
+      const extDir = path.join(process.env.HOME || process.env.USERPROFILE || '', '.que', 'external-signals');
+      const dir = process.env.QUE_HARNESS_SIGNAL_DIR || extDir;
       if (token) {
-        fs.writeFileSync('/dev/tty', `\x1b]777;cue;${Buffer.from(JSON.stringify({ token, signal })).toString('base64')}\x07`);
+        fs.writeFileSync('/dev/tty', `\x1b]777;que;${Buffer.from(JSON.stringify({ token, signal })).toString('base64')}\x07`);
       } else if (dir) {
         fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
         const target = path.join(dir, `${signal.at}-${randomUUID()}.json`);
@@ -36,7 +36,7 @@ export default function cueState(pi) {
   // OMP 18.x dropped agent_settled — its end-of-run event is agent_end. Upstream pi
   // still fires agent_settled, where agent_end alone can precede retries/compaction,
   // so there agent_end only arms a short fallback that agent_settled short-circuits.
-  if (process.env.CUE_HARNESS_KIND === 'omp') {
+  if (process.env.QUE_HARNESS_KIND === 'omp') {
     pi.on('agent_end', (_event, ctx) => settle(ctx));
   } else {
     pi.on('agent_end', (_event, ctx) => {

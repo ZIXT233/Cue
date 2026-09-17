@@ -110,7 +110,7 @@ mod tests {
 
     #[test]
     fn find_stops_on_name() {
-        let root = std::env::temp_dir().join(format!("cue-find-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("que-find-{}", std::process::id()));
         let nested = root.join("a").join("b");
         std::fs::create_dir_all(&nested).unwrap();
         let target = nested.join("rollout-019fb25e-7179-7a41-b520-abde1d5e68fb.jsonl");

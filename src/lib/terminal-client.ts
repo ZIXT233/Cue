@@ -6,9 +6,9 @@ export function isTerminalAbortError(error: unknown) {
 export async function terminalRequest(path: string, options?: RequestInit): Promise<{ id?: string; cwd?: string; readOnly?: boolean }> {
   const response = await fetch(path, { ...options, signal: options?.signal ?? AbortSignal.timeout(15_000) });
   const data = await response.json().catch(() => {
-    throw new Error(`Terminal request failed (HTTP ${response.status}): server returned an empty or invalid JSON response. Check the Cue server log.`);
+    throw new Error(`Terminal request failed (HTTP ${response.status}): server returned an empty or invalid JSON response. Check the Que server log.`);
   });
-  if (!data || typeof data !== "object") throw new Error(`Terminal request failed (HTTP ${response.status}): invalid JSON response. Check the Cue server log.`);
+  if (!data || typeof data !== "object") throw new Error(`Terminal request failed (HTTP ${response.status}): invalid JSON response. Check the Que server log.`);
   if (!response.ok) throw new Error(data.error ?? `HTTP ${response.status}`);
   return data;
 }

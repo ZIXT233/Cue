@@ -3,7 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 // Lifecycle boundaries follow Orca's OpenCode status plugin; see docs/harness/hook-api.md.
-export const CueState = async ({ client }) => {
+export const QueState = async ({ client }) => {
   const sessions = new Map();
   const prompted = new Set();
   // OpenCode auto-titles sessions via the provider's small model. When that
@@ -11,7 +11,7 @@ export const CueState = async ({ client }) => {
   // "New session - <timestamp>" placeholder; treat it as absent so the card
   // falls back to the captured prompt.
   const DEFAULT_TITLE = /^(?:New session|Child session) - \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-  let owner = process.env.CUE_HARNESS_SESSION_ID;
+  let owner = process.env.QUE_HARNESS_SESSION_ID;
   let sequence = Promise.resolve();
   let lastSignalAt = 0;
   const enqueue = work => (sequence = sequence.then(work).catch(() => {}));
@@ -29,13 +29,13 @@ export const CueState = async ({ client }) => {
         title,
         ...extra,
       };
-      const token = process.env.CUE_HARNESS_CHANNEL;
-      const extDir = path.join(process.env.HOME || process.env.USERPROFILE || '', '.cue', 'external-signals');
-      const dir = process.env.CUE_HARNESS_SIGNAL_DIR || extDir;
+      const token = process.env.QUE_HARNESS_CHANNEL;
+      const extDir = path.join(process.env.HOME || process.env.USERPROFILE || '', '.que', 'external-signals');
+      const dir = process.env.QUE_HARNESS_SIGNAL_DIR || extDir;
       if (token) {
         fs.writeFileSync(
-          process.env.CUE_HARNESS_TTY || '/dev/tty',
-          `\x1b]777;cue;${Buffer.from(JSON.stringify({ token, signal })).toString('base64')}\x07`,
+          process.env.QUE_HARNESS_TTY || '/dev/tty',
+          `\x1b]777;que;${Buffer.from(JSON.stringify({ token, signal })).toString('base64')}\x07`,
         );
       } else if (dir) {
         fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -171,4 +171,4 @@ export const CueState = async ({ client }) => {
   };
 };
 
-export default CueState;
+export default QueState;

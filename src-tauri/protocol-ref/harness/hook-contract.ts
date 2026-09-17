@@ -1,13 +1,13 @@
 import type { HarnessState } from "./types.ts";
 
-/** Environment variables injected into a Cue terminal for the shared hook API. */
+/** Environment variables injected into a Que terminal for the shared hook API. */
 export const HOOK_ENV = {
-  SIGNAL_DIR: "CUE_HARNESS_SIGNAL_DIR",
-  CHANNEL: "CUE_HARNESS_CHANNEL",
-  TTY: "CUE_HARNESS_TTY",
-  KIND: "CUE_HARNESS_KIND",
-  SESSION_ID: "CUE_HARNESS_SESSION_ID",
-  HOOK: "CUE_HOOK",
+  SIGNAL_DIR: "QUE_HARNESS_SIGNAL_DIR",
+  CHANNEL: "QUE_HARNESS_CHANNEL",
+  TTY: "QUE_HARNESS_TTY",
+  KIND: "QUE_HARNESS_KIND",
+  SESSION_ID: "QUE_HARNESS_SESSION_ID",
+  HOOK: "QUE_HOOK",
 } as const;
 
 /**

@@ -73,7 +73,7 @@ mod imp {
     /// resource layouts, then dev-tree layouts relative to the cwd.
     fn resolve_dir(resource_dir: Option<&Path>) -> Option<PathBuf> {
         let mut candidates: Vec<PathBuf> = Vec::new();
-        if let Ok(dir) = std::env::var("CUE_CONPTY_DIR") {
+        if let Ok(dir) = std::env::var("QUE_CONPTY_DIR") {
             candidates.push(PathBuf::from(dir));
         }
         if let Some(dir) = resource_dir {

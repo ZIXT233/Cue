@@ -17,9 +17,9 @@ const hpIdx = parts.lastIndexOf('harness-plugins');
 if (hpIdx >= 0 && parts[hpIdx + 1]) {
   inferredKind = parts[hpIdx + 1];
 }
-const kind = process.env.CUE_HARNESS_KIND || inferredKind || (cursorEvents.has(explicitEvent) ? 'cursor' : undefined);
-const token = process.env.CUE_HARNESS_CHANNEL;
-const envDirectory = process.env.CUE_HARNESS_SIGNAL_DIR;
+const kind = process.env.QUE_HARNESS_KIND || inferredKind || (cursorEvents.has(explicitEvent) ? 'cursor' : undefined);
+const token = process.env.QUE_HARNESS_CHANNEL;
+const envDirectory = process.env.QUE_HARNESS_SIGNAL_DIR;
 const activePath = path.join(__dirname, 'active.json');
 // User-level hooks fire for IDE chats, external terminals, etc., which inherit neither
 // SIGNAL_DIR nor CHANNEL. Those sessions are not queue cards, so their events go to the
@@ -39,7 +39,7 @@ let input = '', oversized = false, done = false, finished = false;
 // CLI hook runners kill us on their own deadline (codex 5s, cursor 15s). Fire
 // before theirs so a hung stdin still delivers the signal instead of dying
 // with a "hook timed out" and losing the event.
-const watchdog = Math.max(500, Number(process.env.CUE_HARNESS_WATCHDOG_MS) || 8000);
+const watchdog = Math.max(500, Number(process.env.QUE_HARNESS_WATCHDOG_MS) || 8000);
 const timer = setTimeout(() => { consume(); finish(); }, watchdog);
 function finish() {
   if (finished) return;
@@ -67,19 +67,19 @@ function legacyActiveDirectory() {
   return typeof active?.directory === 'string' && active.directory ? active.directory : undefined;
 }
 
-// Where a session Cue never launched parks its events. The plugin lives at
+// Where a session Que never launched parks its events. The plugin lives at
 // <data>/harness-plugins/<kind>/hook.cjs, so the data root is the parent of the
 // plugin root; the bin/ copy used by dev and tests falls back to the default
 // install location.
 function externalDirectory() {
-  if (process.env.CUE_EXTERNAL_SIGNAL_DIR) return process.env.CUE_EXTERNAL_SIGNAL_DIR;
+  if (process.env.QUE_EXTERNAL_SIGNAL_DIR) return process.env.QUE_EXTERNAL_SIGNAL_DIR;
   const marker = `${path.sep}harness-plugins${path.sep}`;
   const index = __dirname.lastIndexOf(marker);
   if (index > 0) return path.join(__dirname.slice(0, index), 'external-signals');
-  return path.join(os.homedir(), '.cue', 'external-signals');
+  return path.join(os.homedir(), '.que', 'external-signals');
 }
 
-// External sinks have no reader while Cue is closed, so drop stale files here.
+// External sinks have no reader while Que is closed, so drop stale files here.
 function pruneExternal(directory) {
   try {
     const cutoff = Date.now() - 5 * 60 * 1000;
@@ -129,7 +129,7 @@ function consume() {
       notification: payload.notification_type ?? payload.notificationType ?? payload.type,
       prompt: ['UserPromptSubmit', 'beforeSubmitPrompt', 'BeforeAgent'].includes(eventName) ? text(payload.prompt) : undefined };
     if (external) { event.workspaceRoot = workspaceRootOf(payload); event.external = true; }
-    const debug = process.env.CUE_HARNESS_DEBUG === '1';
+    const debug = process.env.QUE_HARNESS_DEBUG === '1';
     // Keep only field metadata, never prompt/reply text, to diagnose missing previews.
     if (debug && kind === 'codex' && directory && eventName === 'Stop') {
       try {
@@ -150,7 +150,7 @@ function consume() {
     if (channel) {
       try {
         const signal = Buffer.from(JSON.stringify({ token: channel, signal: event })).toString('base64');
-        fs.writeFileSync(process.env.CUE_HARNESS_TTY || '/dev/tty', `\x1b]777;cue;${signal}\x07`);
+        fs.writeFileSync(process.env.QUE_HARNESS_TTY || '/dev/tty', `\x1b]777;que;${signal}\x07`);
         delivered.osc = true;
       } catch (error) {
         delivered.oscError = error instanceof Error ? error.message : String(error);

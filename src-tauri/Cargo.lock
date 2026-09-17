@@ -1135,47 +1135,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cue"
-version = "0.1.0"
-dependencies = [
- "async-stream",
- "axum",
- "base64 0.22.1",
- "bytes",
- "dirs",
- "futures",
- "glob",
- "hex",
- "http",
- "mime_guess",
- "parking_lot",
- "portable-pty",
- "regex",
- "russh",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tauri",
- "tauri-build",
- "tauri-plugin-clipboard-manager",
- "tauri-plugin-dialog",
- "tauri-plugin-notification",
- "tauri-plugin-opener",
- "tauri-plugin-single-instance",
- "tempfile",
- "thiserror 2.0.20",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tower-http",
- "url",
- "user-notify",
- "uuid",
- "which",
- "windows-sys 0.59.0",
-]
-
-[[package]]
 name = "curve25519-dalek"
 version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4367,6 +4326,47 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f6d64c71eb498fe9eae14ce4ec935c555749aef511cca85b5568910d6e48001"
 dependencies = [
  "bytemuck",
+]
+
+[[package]]
+name = "que"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "axum",
+ "base64 0.22.1",
+ "bytes",
+ "dirs",
+ "futures",
+ "glob",
+ "hex",
+ "http",
+ "mime_guess",
+ "parking_lot",
+ "portable-pty",
+ "regex",
+ "russh",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-clipboard-manager",
+ "tauri-plugin-dialog",
+ "tauri-plugin-notification",
+ "tauri-plugin-opener",
+ "tauri-plugin-single-instance",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tower-http",
+ "url",
+ "user-notify",
+ "uuid",
+ "which",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

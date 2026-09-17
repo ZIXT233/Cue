@@ -4,112 +4,7 @@ import { useEffect, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { ProviderIcon } from "./ProviderIcon";
 import { ConfigSwitch } from "./SettingsUi";
-import { providerIconId } from "@/lib/harness/catalog";
-
-export type FormSupportStatus = "supported" | "unsupported" | "in_progress";
-
-export interface ExternalHarnessConfig {
-  id: string;
-  name: string;
-  vendor: string;
-  iconId: string;
-  forms: {
-    cli: FormSupportStatus;
-    desktop: FormSupportStatus;
-    vscode: FormSupportStatus;
-  };
-}
-
-const EXTERNAL_HARNESSES: ExternalHarnessConfig[] = [
-  {
-    id: "codex",
-    name: "Codex",
-    vendor: "OpenAI",
-    iconId: "openai",
-    forms: {
-      cli: "supported",
-      desktop: "unsupported",
-      vscode: "supported",
-    },
-  },
-  {
-    id: "cursor",
-    name: "Cursor Agent",
-    vendor: "Cursor",
-    iconId: "cursor",
-    forms: {
-      cli: "supported",
-      desktop: "supported",
-      vscode: "unsupported",
-    },
-  },
-  {
-    id: "antigravity",
-    name: "Antigravity",
-    vendor: "Google",
-    iconId: "google",
-    forms: {
-      cli: "supported",
-      desktop: "supported",
-      vscode: "supported",
-    },
-  },
-  {
-    id: "grok",
-    name: "Grok",
-    vendor: "xAI",
-    iconId: "grok",
-    forms: {
-      cli: "supported",
-      desktop: "unsupported",
-      vscode: "unsupported",
-    },
-  },
-  {
-    id: "claude",
-    name: "Claude Code",
-    vendor: "Anthropic",
-    iconId: "anthropic",
-    forms: {
-      cli: "supported",
-      desktop: "unsupported",
-      vscode: "supported",
-    },
-  },
-  {
-    id: "opencode",
-    name: "OpenCode",
-    vendor: "OpenCode",
-    iconId: "opencode",
-    forms: {
-      cli: "supported",
-      desktop: "supported",
-      vscode: "supported",
-    },
-  },
-  {
-    id: "codebuddy",
-    name: "CodeBuddy",
-    vendor: "Tencent",
-    iconId: "anthropic",
-    forms: {
-      cli: "supported",
-      desktop: "unsupported",
-      vscode: "unsupported",
-    },
-  },
-  {
-    id: "pi",
-    name: "Pi / OMP",
-    vendor: "Pi",
-    iconId: "pi",
-    forms: {
-      cli: "supported",
-      desktop: "unsupported",
-      vscode: "unsupported",
-    },
-  },
-];
+import { externalHarnesses, isPiMark, providerIconId, type FormSupportStatus } from "@/lib/harness/catalog";
 
 function FormCapsule({
   formLabel,
@@ -183,7 +78,7 @@ export function ExternalSessionsSettings() {
       </p>
 
       <div className="external-sessions-list">
-        {EXTERNAL_HARNESSES.map((harness) => {
+        {externalHarnesses.map((harness) => {
           const isEnabled = ingress[harness.id] !== false;
           const isLoading = loadingHarness === harness.id;
 
@@ -192,7 +87,7 @@ export function ExternalSessionsSettings() {
               <div className="external-harness-card-header">
                 <div className="external-harness-brand">
                   <span className="external-harness-icon-wrap">
-                    {harness.iconId === "pi" ? (
+                    {isPiMark(harness.id) ? (
                       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--text-muted)" }}>
                         <polyline points="4 17 10 11 4 5" />
                         <line x1="12" y1="19" x2="20" y2="19" />

@@ -19,7 +19,7 @@ export function sshLoginCommand(command: string): string {
 }
 
 export async function sshLoginExec(host: string, command: string): Promise<Buffer> {
-  const marker = `__CUE_LOGIN_${randomUUID()}__`;
+  const marker = `__QUE_LOGIN_${randomUUID()}__`;
   const output = await sshExec(host, sshLoginCommand(`printf '%s' ${shellQuote(marker)}; ${command}`));
   const start = output.indexOf(marker);
   if (start < 0) throw new Error("远程 Shell 未执行检测命令，请检查 Shell 启动配置");
@@ -47,7 +47,7 @@ export async function sshExec(host: string, command: string, input?: string | Bu
 
 export async function loadSshWorkspace(cwd: string): Promise<{ sshHost: string; cwd: string } | null> {
   // Only the shell's private runtime directories are interpreted as SSH roots.
-  if (!cwd.startsWith(join(process.env.CUE_DATA_DIR || join(process.cwd(), ".cue"), "ssh") + "/")) return null;
+  if (!cwd.startsWith(join(process.env.QUE_DATA_DIR || join(process.cwd(), ".que"), "ssh") + "/")) return null;
   try { return JSON.parse(await readFile(join(cwd, "remote-workspace.json"), "utf8")); }
   catch (error) { throw new Error(`SSH 工作区配置不可读：${String(error)}`); }
 }

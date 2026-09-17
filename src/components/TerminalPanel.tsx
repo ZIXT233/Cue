@@ -53,7 +53,7 @@ function liveThemeProfile(themeProfile: TerminalThemeProfile | undefined, remote
 /// the CLI is expected to consume them off its own input. The ones seen in the
 /// wild do not — Cursor probes DA1 at startup and then echoes the `[?1;2c` it
 /// gets back onto its prompt as literal text. Withholding the reply is the
-/// correct fallback: the CLI drops through to `TERM` / `COLORFGBG`, which Cue
+/// correct fallback: the CLI drops through to `TERM` / `COLORFGBG`, which Que
 /// already sets at spawn.
 ///
 /// Deliberately exact-match rather than a prefix test. `ESC[A`..`ESC[D`, `ESC[H`,
@@ -70,8 +70,8 @@ const CAPABILITY_REPLIES = [
   "\x1b[>85;95;0c",       // DA2 — VT220-class
   "\x1b[>83;40003;0c",    // DA2 — VT320-class
   "\x1b[0n",              // DSR — device status OK
-  // Focus reporting is Cue's, not xterm's. The same two sequences mean different
-  // things: xterm emits them for browser textarea focus, while Cue means "this
+  // Focus reporting is Que's, not xterm's. The same two sequences mean different
+  // things: xterm emits them for browser textarea focus, while Que means "this
   // card is / is not in the queue" (see sendFocusReport). Two sources writing
   // opposite meanings into one stream is worse than either alone, and the queue
   // reading is the one the CLI actually acts on. `sendFocusReport` is therefore

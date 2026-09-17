@@ -34,7 +34,7 @@ export interface QueueCard {
   sideTerminals?: { id: string; cwd: string }[];
   sideTerminalOpen?: boolean;
   /**
-   * A session Cue never launched (Cursor IDE, another terminal). Composed client-side
+   * A session Que never launched (Cursor IDE, another terminal). Composed client-side
    * from the `external` overlay so it rides the deck like any card — same size, same
    * slide — while staying out of `queue.json` and out of every scheduler decision.
    */
@@ -46,7 +46,7 @@ export interface ExternalTurn {
   text: string;
 }
 
-/** An attention call from a session Cue never launched (Cursor IDE, another terminal). */
+/** An attention call from a session Que never launched (Cursor IDE, another terminal). */
 export interface ExternalNotice {
   /** Provider conversation id, or the workspace path when the CLI reports none. */
   id: string;
@@ -96,7 +96,7 @@ export function externalQueueCards(notices: ExternalNotice[] | undefined): Queue
 }
 
 /**
- * Sessions working outside Cue. They are not cards — there is no terminal to open and
+ * Sessions working outside Que. They are not cards — there is no terminal to open and
  * nothing to type into — so the sidebar lists them as background entries.
  */
 export function externalWorkingNotices(notices: ExternalNotice[] | undefined): ExternalNotice[] {

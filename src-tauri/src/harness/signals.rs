@@ -28,9 +28,9 @@ pub struct HookSignal {
     /// paused mid-turn. Reported as the fact it is — the ingress does not rename the
     /// event into a different one to carry it.
     pub fully_idle: Option<bool>,
-    /// Cold-start workspace reported by a global (non-Cue) hook.
+    /// Cold-start workspace reported by a global (non-Que) hook.
     pub workspace_root: Option<String>,
-    /// Set by the ingress when the emitting process carried no Cue channel: the event
+    /// Set by the ingress when the emitting process carried no Que channel: the event
     /// belongs to an external session, not to a queue card.
     pub external: Option<bool>,
 }
@@ -38,7 +38,9 @@ pub struct HookSignal {
 #[derive(Debug, Clone, Default)]
 pub struct ProbeState {
     pub reply_preview: Option<String>,
-    pub antigravity_completed: bool,
+    /// Whether this harness's last `Stop` really ended the turn — only a harness whose
+    /// stragglers must be suppressed keeps track of it.
+    pub turn_completed: bool,
     pub state: String,
     pub at: i64,
     pub shell_command_started_at: Option<i64>,
@@ -112,23 +114,17 @@ pub enum Meaning {
 
 /// A tool start whose gate the CLI owns, so the ask is only a guess.
 ///
-/// Cursor answers its own permission hooks on Cue's behalf (the ingress returns
+/// Cursor answers its own permission hooks on Que's behalf (the ingress returns
 /// `allow`), and Antigravity has no permission event at all, so in neither case does
 /// the payload say whether the user was asked — every tool call fires these. They are
-/// held for [`HELD_ATTENTION_MS`] instead of raised.
+/// held for [`HELD_ATTENTION_MS`] instead of raised. Which events count is declared by
+/// each harness (`kinds/<kind>.rs::guesses_attention`).
 ///
 /// Claude-family CLIs are deliberately absent: their `PreToolUse` is a plain "the tool
 /// is running", and a real ask arrives as its own `Notification(permission_prompt)`.
-fn guesses_attention(signal: &HookSignal) -> bool {
-    match signal.kind.as_deref() {
-        Some("antigravity") => signal.event == "PreToolUse",
-        Some("cursor") => ["preToolUse", "beforeShellExecution", "beforeMCPExecution"].contains(&signal.event.as_str()),
-        _ => false,
-    }
-}
-
-/// Tools whose whole purpose is to ask. Unlike a tool gate these fire for one call
-/// only, so the hook *is* the ask and there is nothing to guess about.
+///
+/// Tools whose whole purpose is to ask fire for one call only, so the hook *is* the ask
+/// and there is nothing to guess about.
 fn asks_the_user(tool: &str) -> bool {
     let name = tool.rsplit(['/', '.']).next().unwrap_or(tool);
     matches!(name, "request_user_input" | "ask_user_question" | "ask_user" | "ask_question" | "AskUserQuestion")
@@ -140,13 +136,15 @@ fn is_ask_notification(signal: &HookSignal) -> bool {
         && ["permission_prompt", "ToolPermission", "idle_prompt"].contains(&signal.notification.as_deref().unwrap_or(""))
 }
 
-/// The one place a harness's vocabulary is read.
-pub fn meaning_of(signal: &HookSignal) -> Meaning {
+/// The shared vocabulary every harness's words are read through. The one per-harness
+/// input is whether a tool start is a gate the CLI answers itself; everything else is
+/// a plain event name.
+pub(crate) fn default_meaning(signal: &HookSignal, guesses_attention: bool) -> Meaning {
     if signal.agent_id.is_some() { return Meaning::Nothing; }
     // An ask-shaped tool is the ask itself, whatever gate the harness owns.
     let tool_start = matches!(signal.event.as_str(), "PreToolUse" | "BeforeTool" | "preToolUse");
     if tool_start && asks_the_user(signal.tool.as_deref().unwrap_or("")) { return Meaning::Attention; }
-    if guesses_attention(signal) { return Meaning::MaybeAttention; }
+    if guesses_attention { return Meaning::MaybeAttention; }
     if is_ask_notification(signal) { return Meaning::Attention; }
     match signal.event.as_str() {
         "SessionStart" | "sessionStart" => Meaning::SessionStart,
@@ -155,7 +153,7 @@ pub fn meaning_of(signal: &HookSignal) -> Meaning {
         // Tool traffic: a turn already in progress.
         "PreToolUse" | "PostToolUse" | "PostToolUseFailure" | "BeforeTool" | "AfterTool"
         | "PostInvocation" | "preToolUse" | "postToolUse" | "postToolUseFailure" => Meaning::Working,
-        // A turn that ended — unless Antigravity reports that it only paused.
+        // A turn that ended — unless the harness reports that it only paused.
         "stop" | "Stop" | "StopFailure" | "StopCancelled" | "sessionEnd" | "AfterAgent" | "afterAgentResponse" => {
             if signal.fully_idle == Some(false) { Meaning::Working } else { Meaning::TurnEnd }
         }
@@ -176,7 +174,10 @@ pub fn hook_state(meaning: Meaning) -> Option<&'static str> {
 
 pub fn observe_hook(current: ProbeState, raw: HookSignal) -> ProbeState {
     if raw.agent_id.is_some() { return current; }
-    let meaning = meaning_of(&raw);
+    // The signal's own kind names the harness; an unknown name observes through the
+    // generic vocabulary, exactly as it did before that name existed.
+    let harness = super::registry::resolve(raw.kind.as_deref().unwrap_or(""));
+    let meaning = harness.meaning(&raw);
     let session_id = raw.session_id.as_deref().filter(|id| regex::Regex::new(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$").unwrap().is_match(id)).map(|s| s.to_string());
     // Signals already landed on this card (process env). Cursor /resume and TUI
     // session switches often skip sessionStart and reuse a different conversation id.
@@ -211,14 +212,14 @@ pub fn observe_hook(current: ProbeState, raw: HookSignal) -> ProbeState {
         }
     }
     if raw.at < current.at { return next; }
-    // Antigravity files stragglers once a turn really ended, so it needs the two turn
+    // A harness that files stragglers once a turn really ended needs the two turn
     // boundaries told apart from the states it also reports.
-    if raw.kind.as_deref() == Some("antigravity") && current.antigravity_completed && !new_identity
+    if harness.suppresses_stragglers() && current.turn_completed && !new_identity
         && meaning != Meaning::TurnStart && meaning != Meaning::TurnEnd {
         return next;
     }
-    if raw.kind.as_deref() == Some("antigravity") {
-        next.antigravity_completed = meaning == Meaning::TurnEnd;
+    if harness.suppresses_stragglers() {
+        next.turn_completed = meaning == Meaning::TurnEnd;
     }
     if let Some(state) = hook_state(meaning) {
         next.reply_preview = if state == "working" { None } else { clean(raw.reply_preview.as_ref()).or_else(|| if new_identity { None } else { current.reply_preview.clone() }) };
@@ -284,6 +285,7 @@ pub fn observe_title(current: ProbeState, state: &str, at: i64) -> ProbeState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::harness::registry;
 
     /// Claude-family `PreToolUse` means "the tool is running", so a CodeBuddy tool
     /// call stays "working"; only a bare turn end, or a prompt notification, waits
@@ -297,7 +299,7 @@ mod tests {
             at: 1,
             ..HookSignal::default()
         };
-        assert_eq!(hook_state(meaning_of(&edit)), Some("working"));
+        assert_eq!(hook_state(registry::resolve("codebuddy").meaning(&edit)), Some("working"));
 
         let stop = HookSignal {
             kind: Some("codebuddy".into()),
@@ -305,7 +307,7 @@ mod tests {
             at: 2,
             ..HookSignal::default()
         };
-        assert_eq!(hook_state(meaning_of(&stop)), Some("attention"));
+        assert_eq!(hook_state(registry::resolve("codebuddy").meaning(&stop)), Some("attention"));
 
         let blocked = HookSignal {
             kind: Some("codebuddy".into()),
@@ -314,11 +316,11 @@ mod tests {
             at: 3,
             ..HookSignal::default()
         };
-        assert_eq!(hook_state(meaning_of(&blocked)), Some("attention"));
+        assert_eq!(hook_state(registry::resolve("codebuddy").meaning(&blocked)), Some("attention"));
     }
 
     /// The translation table is the whole contract: one row per thing a harness can say,
-    /// and the conclusion Cue draws from it. Nothing downstream reads an event name.
+    /// and the conclusion Que draws from it. Nothing downstream reads an event name.
     #[test]
     fn every_event_lands_on_one_conclusion() {
         let cases = [
@@ -339,12 +341,12 @@ mod tests {
         ];
         for (event, expected) in cases {
             let signal = HookSignal { kind: Some("claude".into()), event: event.into(), at: 1, ..HookSignal::default() };
-            assert_eq!(meaning_of(&signal), expected, "{event}");
+            assert_eq!(registry::resolve("claude").meaning(&signal), expected, "{event}");
         }
         // The two things that are not simply a state: a gate the CLI owns, and an ask the
         // CLI states outright.
         let gate = HookSignal { kind: Some("cursor".into()), event: "preToolUse".into(), at: 1, ..HookSignal::default() };
-        assert_eq!(meaning_of(&gate), Meaning::MaybeAttention);
+        assert_eq!(registry::resolve("cursor").meaning(&gate), Meaning::MaybeAttention);
         let asked = HookSignal {
             kind: Some("claude".into()),
             event: "Notification".into(),
@@ -352,7 +354,7 @@ mod tests {
             at: 1,
             ..HookSignal::default()
         };
-        assert_eq!(meaning_of(&asked), Meaning::Attention);
+        assert_eq!(registry::resolve("claude").meaning(&asked), Meaning::Attention);
         // A subagent's events are nobody's card.
         let child = HookSignal {
             kind: Some("claude".into()),
@@ -361,7 +363,7 @@ mod tests {
             at: 1,
             ..HookSignal::default()
         };
-        assert_eq!(meaning_of(&child), Meaning::Nothing);
+        assert_eq!(registry::resolve("claude").meaning(&child), Meaning::Nothing);
     }
 
     #[test]
@@ -504,7 +506,7 @@ mod tests {
             ..HookSignal::default()
         });
         assert_eq!(paused.state, "working");
-        assert!(!paused.antigravity_completed);
+        assert!(!paused.turn_completed);
         // A Stop that really ends the turn parks the card on the user.
         let ended = observe_hook(working, HookSignal {
             kind: Some("antigravity".into()),
@@ -514,7 +516,7 @@ mod tests {
             ..HookSignal::default()
         });
         assert_eq!(ended.state, "attention");
-        assert!(ended.antigravity_completed);
+        assert!(ended.turn_completed);
         // A straggler from that finished turn still cannot move it.
         let late = observe_hook(ended, HookSignal {
             kind: Some("antigravity".into()),

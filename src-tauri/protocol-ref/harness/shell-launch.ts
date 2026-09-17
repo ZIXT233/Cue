@@ -14,7 +14,7 @@ export async function prepareShell(workspace: QueueWorkspace, directory: string)
   if (remote) {
     const facts = (await sshExec(workspace.sshHost!, 'printf "%s\\n%s\\n%s" "$HOME" "${SHELL:-/bin/bash}" "${ZDOTDIR:-$HOME}"')).toString().split("\n");
     [userHome, shell, originalZdotdir] = facts;
-    root = `${userHome}/.cache/cue/shell/${basename(directory)}`;
+    root = `${userHome}/.cache/que/shell/${basename(directory)}`;
   }
   const files: Record<string, string> = {};
   let args: string[];
@@ -26,9 +26,9 @@ export async function prepareShell(workspace: QueueWorkspace, directory: string)
     args = ["-NoLogo", "-NoExit", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")];
   } else if (basename(shell) === "zsh") {
     files["integration.sh"] = await readFile(join(process.cwd(), "bin/shell/zsh-integration.sh"), "utf8");
-    files[".zshenv"] = `ZDOTDIR=${shellQuote(originalZdotdir)}\n[[ -r "$ZDOTDIR/.zshenv" ]] && source "$ZDOTDIR/.zshenv"\nexport CUE_USER_ZDOTDIR="\${ZDOTDIR:-$HOME}"\nexport ZDOTDIR=${shellQuote(root)}\n`;
-    files[".zprofile"] = '[[ -r "$CUE_USER_ZDOTDIR/.zprofile" ]] && source "$CUE_USER_ZDOTDIR/.zprofile"\n';
-    files[".zshrc"] = `ZDOTDIR="$CUE_USER_ZDOTDIR"\n[[ -r "$ZDOTDIR/.zshrc" ]] && source "$ZDOTDIR/.zshrc"\nunset CUE_USER_ZDOTDIR\nsource ${shellQuote(`${root}/integration.sh`)}\n`;
+    files[".zshenv"] = `ZDOTDIR=${shellQuote(originalZdotdir)}\n[[ -r "$ZDOTDIR/.zshenv" ]] && source "$ZDOTDIR/.zshenv"\nexport QUE_USER_ZDOTDIR="\${ZDOTDIR:-$HOME}"\nexport ZDOTDIR=${shellQuote(root)}\n`;
+    files[".zprofile"] = '[[ -r "$QUE_USER_ZDOTDIR/.zprofile" ]] && source "$QUE_USER_ZDOTDIR/.zprofile"\n';
+    files[".zshrc"] = `ZDOTDIR="$QUE_USER_ZDOTDIR"\n[[ -r "$ZDOTDIR/.zshrc" ]] && source "$ZDOTDIR/.zshrc"\nunset QUE_USER_ZDOTDIR\nsource ${shellQuote(`${root}/integration.sh`)}\n`;
     env.ZDOTDIR = root;
     args = ["-il"];
   } else if (basename(shell) === "bash") {

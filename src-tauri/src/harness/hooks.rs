@@ -1,5 +1,5 @@
-use super::adapters::{antigravity, claude, codex, cursor, grok, opencode, pi, plan_for, Ctx};
 use super::install::{GlobalCtx, Host};
+use super::registry::{self, Ctx};
 use crate::error::AppResult;
 use crate::models::QueueWorkspace;
 use crate::paths::{atomic_write, signal_dir};
@@ -24,8 +24,9 @@ pub async fn prepare_hook_launch(
     // The ingress is read first: a missing one has to fail the launch, and its bytes
     // also key the remote cache path.
     let ingress = std::fs::read_to_string(bin_dir.join("harness-hook.cjs"))?;
+    let harness = registry::find(kind).ok_or_else(|| crate::error::AppError::msg("不支持的 CLI agent"))?;
     let host = Host::open(kind, workspace, token, &ingress).await?;
-    let plan = plan_for(&Ctx { kind, workspace, host: &host, bin_dir }).await?;
+    let plan = harness.plan(Ctx { kind, workspace, host: &host, bin_dir }).await?;
     host.install(&plan).await?;
     let args = plan.args;
     let mut env = plan.env;
@@ -68,13 +69,13 @@ pub fn sync_installed_hooks(bin_dir: &Path, plugins: &Path) -> Vec<String> {
     refreshed
 }
 
-/// Install the hooks that serve sessions Cue never launched — IDE chats, plain terminals.
+/// Install the hooks that serve sessions Que never launched — IDE chats, plain terminals.
 /// Their user-level config is global, so one pass covers all of them. Each harness owns
-/// its own file (`adapters/<kind>.rs::global`); nothing here knows one from another.
+/// its own file (`kinds/<kind>.rs::global`); nothing here knows one from another.
 pub fn deploy_external_hooks(bin_dir: &Path, plugins: &Path) {
     let ctx = GlobalCtx::new(bin_dir, plugins);
-    for global in [cursor::global, codex::global, antigravity::global, grok::global, claude::global, opencode::global, pi::global] {
-        global(&ctx);
+    for harness in registry::ALL {
+        harness.global(&ctx);
     }
 }
 

@@ -1,5 +1,5 @@
 {
-  "name": "cue",
+  "name": "que",
   "private": true,
   "version": "0.1.0",
   "description": "Queue of Agent Cues — schedule your attention with a unified queue of waiting Agent sessions.",

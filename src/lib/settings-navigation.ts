@@ -9,7 +9,7 @@ export const SETTINGS_SECTION_VALUES = [
 export type SettingsSection = (typeof SETTINGS_SECTION_VALUES)[number];
 export type SettingsDetailSection = Exclude<SettingsSection, "general">;
 
-const STORAGE_KEY = "cue:settings-navigation";
+const STORAGE_KEY = "que:settings-navigation";
 
 interface StorageLike {
   getItem(key: string): string | null;

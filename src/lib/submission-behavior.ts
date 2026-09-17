@@ -1,5 +1,5 @@
-export const SUBMISSION_BEHAVIOR_KEY = "cue:submission-behavior";
-export const SUBMISSION_BEHAVIOR_CHANGED = "cue:submission-behavior-changed";
+export const SUBMISSION_BEHAVIOR_KEY = "que:submission-behavior";
+export const SUBMISSION_BEHAVIOR_CHANGED = "que:submission-behavior-changed";
 
 export const SUBMISSION_BEHAVIORS = [
   { id: "keep-in-view", icon: "◉", label: "settings.submissionKeepInView" },

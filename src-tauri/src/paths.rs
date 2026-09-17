@@ -1,21 +1,21 @@
 use std::path::{Path, PathBuf};
 
 pub fn data_dir() -> PathBuf {
-    if let Ok(path) = std::env::var("CUE_DATA_DIR") {
+    if let Ok(path) = std::env::var("QUE_DATA_DIR") {
         return PathBuf::from(path);
     }
-    dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".cue")
+    dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".que")
 }
 
 pub fn queue_file() -> PathBuf {
-    if let Ok(path) = std::env::var("CUE_QUEUE_FILE") {
+    if let Ok(path) = std::env::var("QUE_QUEUE_FILE") {
         return PathBuf::from(path);
     }
     data_dir().join("queue.json")
 }
 
 pub fn remote_hosts_file() -> PathBuf {
-    if let Ok(path) = std::env::var("CUE_REMOTE_HOSTS") {
+    if let Ok(path) = std::env::var("QUE_REMOTE_HOSTS") {
         return PathBuf::from(path);
     }
     data_dir().join("remote-hosts.json")
@@ -37,17 +37,17 @@ pub fn signal_dir(terminal_id: &str) -> PathBuf {
     data_dir().join("harness-signals").join(terminal_id)
 }
 
-/// Signals from sessions Cue never launched. Cursor's user-level `hooks.json` is
+/// Signals from sessions Que never launched. Cursor's user-level `hooks.json` is
 /// global, so IDE chats and other terminals report here; they have no terminal id
 /// and must never be mistaken for a queue card.
 pub fn external_signal_dir() -> PathBuf {
-    if let Ok(path) = std::env::var("CUE_EXTERNAL_SIGNAL_DIR") {
+    if let Ok(path) = std::env::var("QUE_EXTERNAL_SIGNAL_DIR") {
         return PathBuf::from(path);
     }
     data_dir().join("external-signals")
 }
 
-/// Cue's per-CLI hook plugins. Each kind owns one directory of files here.
+/// Que's per-CLI hook plugins. Each kind owns one directory of files here.
 pub fn plugins_dir() -> PathBuf {
     data_dir().join("harness-plugins")
 }
@@ -95,7 +95,7 @@ fn parent_tmp(path: &Path) -> PathBuf {
 }
 
 pub fn resolve_bin_dir(resource_dir: Option<PathBuf>) -> PathBuf {
-    if let Ok(path) = std::env::var("CUE_BIN_DIR") {
+    if let Ok(path) = std::env::var("QUE_BIN_DIR") {
         return PathBuf::from(path);
     }
     if let Some(dir) = resource_dir {

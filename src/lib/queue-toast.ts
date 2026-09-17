@@ -1,4 +1,4 @@
-export const QUEUE_TOAST_EVENT = "cue:queue-toast";
+export const QUEUE_TOAST_EVENT = "que:queue-toast";
 
 export function announceQueueToast(message: string) {
   if (typeof window === "undefined" || !message) return;

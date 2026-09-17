@@ -1,20 +1,80 @@
 import type { HarnessId } from "./types";
 
-export const harnessCatalog: { id: HarnessId; name: string; description: string; hidden?: boolean }[] = [
-  { id: "codex", name: "Codex", description: "OpenAI · CLI" },
-  { id: "claude", name: "Claude Code", description: "Anthropic · CLI" },
-  { id: "codebuddy", name: "CodeBuddy", description: "Tencent · CLI" },
-  { id: "cursor", name: "Cursor Agent", description: "Cursor · CLI" },
-  { id: "pi", name: "Pi", description: "Pi · CLI" },
-  { id: "omp", name: "Oh My Pi", description: "OMP · CLI" },
-  { id: "grok", name: "Grok Build", description: "xAI · CLI" },
-  { id: "antigravity", name: "Antigravity CLI", description: "Google · CLI" },
-  { id: "opencode", name: "OpenCode", description: "OpenCode · CLI" },
-  { id: "shell", name: "Shell", description: "手动放入工作区，命令完成通知；不接入 Harness 通知探针" },
+/** Support status of one external-session form factor. */
+export type FormSupportStatus = "supported" | "unsupported" | "in_progress";
+
+export interface HarnessCatalogEntry {
+  id: HarnessId;
+  name: string;
+  description: string;
+  /** Picker only; a hidden id still resolves names, icons and quirks. */
+  hidden?: boolean;
+  /** Vendor line, shown in the external-sessions settings. */
+  vendor?: string;
+  iconId?: string;
+  forms?: { cli: FormSupportStatus; desktop: FormSupportStatus; vscode: FormSupportStatus };
+  /** The terminal theme palette this harness paints itself in. */
+  themeProfile?: "grok";
+  /** Whether the PTY hides the cursor after ConPTY respawn (default true). */
+  conptyCursorHide?: boolean;
+  /** Whether focus events are reported to the CLI (default true). */
+  focusReporting?: boolean;
+}
+
+/**
+ * The one harness registry on the frontend. The picker, the external-sessions settings,
+ * the icon mapping and the terminal quirks all read from here — adding a harness means
+ * adding one entry, mirroring the backend `kinds/<kind>.rs` registry.
+ */
+export const harnessCatalog: HarnessCatalogEntry[] = [
+  { id: "codex", name: "Codex", description: "OpenAI · CLI", vendor: "OpenAI", iconId: "openai", forms: { cli: "supported", desktop: "unsupported", vscode: "supported" }, conptyCursorHide: false },
+  { id: "claude", name: "Claude Code", description: "Anthropic · CLI", vendor: "Anthropic", iconId: "anthropic", forms: { cli: "supported", desktop: "unsupported", vscode: "supported" } },
+  { id: "codebuddy", name: "CodeBuddy", description: "Tencent · CLI", vendor: "Tencent", iconId: "anthropic", forms: { cli: "supported", desktop: "unsupported", vscode: "unsupported" } },
+  { id: "cursor", name: "Cursor Agent", description: "Cursor · CLI", vendor: "Cursor", iconId: "cursor", forms: { cli: "supported", desktop: "supported", vscode: "unsupported" } },
+  { id: "pi", name: "Pi", description: "Pi · CLI", vendor: "Pi", iconId: "pi", forms: { cli: "supported", desktop: "unsupported", vscode: "unsupported" } },
+  { id: "omp", name: "Oh My Pi", description: "OMP · CLI", vendor: "Pi", iconId: "pi", forms: { cli: "supported", desktop: "unsupported", vscode: "unsupported" } },
+  { id: "grok", name: "Grok Build", description: "xAI · CLI", vendor: "xAI", iconId: "grok", forms: { cli: "supported", desktop: "unsupported", vscode: "unsupported" }, themeProfile: "grok" },
+  { id: "antigravity", name: "Antigravity CLI", description: "Google · CLI", vendor: "Google", iconId: "google", forms: { cli: "supported", desktop: "supported", vscode: "supported" } },
+  { id: "opencode", name: "OpenCode", description: "OpenCode · CLI", vendor: "OpenCode", iconId: "opencode", forms: { cli: "supported", desktop: "supported", vscode: "supported" } },
+  { id: "shell", name: "Shell", description: "手动放入工作区，命令完成通知；不接入 Harness 通知探针", focusReporting: false },
 ];
+
+const harnessMeta = (id: HarnessId | string) => harnessCatalog.find(item => item.id === id);
+
 export const harnessPicker = harnessCatalog.filter(item => !item.hidden);
 /** Accepts any id, so an external notice can name a CLI that is not in the picker. */
-export const harnessName = (id: HarnessId | string) => harnessCatalog.find(item => item.id === id)?.name ?? id;
+export const harnessName = (id: HarnessId | string) => harnessMeta(id)?.name ?? id;
+
+/**
+ * The external-ingress toggles, in settings order. OMP reports through Pi's extension
+ * and shares its settings key, so the two share one card — as on the backend, where
+ * `omp` resolves to Pi's `ingress_key`.
+ */
+const EXTERNAL_ORDER: HarnessId[] = ["codex", "cursor", "antigravity", "grok", "claude", "opencode", "codebuddy", "pi"];
+export interface ExternalHarnessEntry {
+  id: HarnessId;
+  name: string;
+  vendor: string;
+  iconId: string;
+  forms: { cli: FormSupportStatus; desktop: FormSupportStatus; vscode: FormSupportStatus };
+}
+export const externalHarnesses: ExternalHarnessEntry[] = EXTERNAL_ORDER.map(id => {
+  const meta = harnessMeta(id)!;
+  return { id, name: id === "pi" ? "Pi / OMP" : meta.name, vendor: meta.vendor!, iconId: meta.iconId!, forms: meta.forms! };
+});
 
 const PROVIDER_ICON_IDS: Record<string, string> = { codex: "openai", claude: "anthropic", gemini: "google", antigravity: "google" };
-export const providerIconId = (id: string) => PROVIDER_ICON_IDS[id] ?? id;
+export const providerIconId = (id: string) => PROVIDER_ICON_IDS[id] ?? harnessMeta(id)?.iconId ?? id;
+
+/** Pi and its fork share the π glyph; they have no provider-icon symbol. */
+export const isPiMark = (id: HarnessId | string) => id === "pi" || id === "omp";
+
+/** Terminal options for one harness, with the component defaults filled in. */
+export const terminalOptions = (id: HarnessId | string) => {
+  const meta = harnessMeta(id);
+  return {
+    themeProfile: meta?.themeProfile,
+    conptyCursorHide: meta?.conptyCursorHide ?? true,
+    focusReporting: meta?.focusReporting ?? true,
+  };
+};

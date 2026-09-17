@@ -1,8 +1,8 @@
-//! Rotating file log at `~/.cue/logs/cue.log`.
+//! Rotating file log at `~/.que/logs/que.log`.
 //!
 //! Default level is Info (release-safe). Settings "debug logging" raises it to
-//! Debug. `CUE_LOG=trace|debug|info|warn|error|0` overrides the setting.
-//! `CUE_LOG_STDERR=1` also mirrors lines to stderr.
+//! Debug. `QUE_LOG=trace|debug|info|warn|error|0` overrides the setting.
+//! `QUE_LOG_STDERR=1` also mirrors lines to stderr.
 
 use crate::error::AppError;
 use crate::paths::logs_dir;
@@ -58,8 +58,8 @@ fn terms() -> parking_lot::MutexGuard<'static, std::collections::HashMap<String,
 }
 
 pub fn init() {
-    STDERR.store(std::env::var("CUE_LOG_STDERR").is_ok_and(|v| v != "0"), Ordering::Relaxed);
-    if let Ok(value) = std::env::var("CUE_LOG") {
+    STDERR.store(std::env::var("QUE_LOG_STDERR").is_ok_and(|v| v != "0"), Ordering::Relaxed);
+    if let Ok(value) = std::env::var("QUE_LOG") {
         ENV_LOCKED.store(true, Ordering::Relaxed);
         match Level::from_env(&value) {
             Some(level) => MIN.store(level as u8, Ordering::Relaxed),
@@ -67,7 +67,7 @@ pub fn init() {
         }
         return;
     }
-    if std::env::var("CUE_DEBUG").is_ok_and(|v| v == "0") {
+    if std::env::var("QUE_DEBUG").is_ok_and(|v| v == "0") {
         ENV_LOCKED.store(true, Ordering::Relaxed);
         MIN.store(0, Ordering::Relaxed);
     }
@@ -100,7 +100,7 @@ pub fn enabled(level: Level) -> bool {
 }
 
 pub fn logs_path() -> std::path::PathBuf {
-    logs_dir().join("cue.log")
+    logs_dir().join("que.log")
 }
 
 pub fn log_path() -> std::path::PathBuf {
@@ -266,7 +266,7 @@ fn rotate_if_needed(path: &std::path::Path) {
         return;
     }
     let dir = path.parent().unwrap_or(path);
-    let stem = "cue";
+    let stem = "que";
     let oldest = dir.join(format!("{stem}.{BACKUPS}.log"));
     let _ = std::fs::remove_file(&oldest);
     for index in (1..BACKUPS).rev() {

@@ -1,4 +1,4 @@
-//! Sessions Cue never launched.
+//! Sessions Que never launched.
 //!
 //! Cursor's user-level `hooks.json` is global, so the same ingress also fires for
 //! IDE chats and terminals this app has no terminal id for. Those sessions are not
@@ -30,6 +30,13 @@ const POLL_MS: u64 = 500;
 /// Preview limit for notification signals and fallbacks.
 const PREVIEW_MAX_CHARS: usize = 16_000;
 const PROMPT_MAX_CHARS: usize = 4_000;
+
+/// The kind a signal without one is filed under. Cursor is the only harness whose
+/// user-level `hooks.json` is global, so its ingress is the one that can fire from a
+/// context that carries no kind — this fallback is the single record of that fact.
+fn signal_kind(signal: &HookSignal) -> String {
+    signal.kind.clone().unwrap_or_else(|| "cursor".into())
+}
 
 struct Tracked {
     notice: ExternalNotice,
@@ -160,7 +167,7 @@ fn apply_with_settings(
     if signal.agent_id.is_some() || now - signal.at > SIGNAL_MAX_AGE_MS {
         return false;
     }
-    let kind = signal.kind.clone().unwrap_or_else(|| "cursor".into());
+    let kind = signal_kind(&signal);
     if let Some(check) = is_enabled {
         if !check(&kind) {
             return false;
@@ -195,7 +202,7 @@ fn apply_with_settings(
     // Reading the session's own files costs disk work, and the notices lock is read on
     // every snapshot, so it is never held across it. Everything that decides whether
     // this ask is still wanted happens below, under one lock, as it did before.
-    let kind = signal.kind.clone().unwrap_or_else(|| "cursor".into());
+    let kind = signal_kind(&signal);
     let facts = session_facts(&kind, signal.session_id.as_deref());
     let mut map = notices.lock();
     // A hand-dismissed notice stays down until this session asks something newer;
@@ -279,7 +286,7 @@ fn set_working(notices: &Mutex<HashMap<String, Tracked>>, key: &str, signal: &Ho
     let mut map = notices.lock();
     let mut notice = map.get(key).map(|tracked| tracked.notice.clone()).unwrap_or_else(|| ExternalNotice {
         id: key.to_string(),
-        kind: signal.kind.clone().unwrap_or_else(|| "cursor".into()),
+        kind: signal_kind(signal),
         session_id: signal.session_id.clone(),
         project: signal.workspace_root.as_deref().and_then(project_name),
         cwd: signal.workspace_root.clone(),
@@ -385,7 +392,7 @@ mod tests {
             at,
             event: event.into(),
             session_id: Some(SESSION.into()),
-            workspace_root: Some("/home/u/Projects/cue".into()),
+            workspace_root: Some("/home/u/Projects/que".into()),
             external: Some(true),
             ..HookSignal::default()
         }
@@ -429,7 +436,7 @@ mod tests {
         let at = now();
         assert!(apply(&probes, &notices, signal("stop", at)));
         let raised = only(&notices);
-        assert_eq!(raised.project.as_deref(), Some("cue"));
+        assert_eq!(raised.project.as_deref(), Some("que"));
         assert_eq!(raised.state, "attention");
         assert_eq!(raised.id, SESSION);
         // The same attention event must not churn the notice (and its SSE refresh).
@@ -479,7 +486,7 @@ mod tests {
         let entry = only(&notices);
         assert_eq!(entry.state, "working");
         assert_eq!(entry.kind, "cursor");
-        assert_eq!(entry.project.as_deref(), Some("cue"));
+        assert_eq!(entry.project.as_deref(), Some("que"));
         // Nothing asked yet, so there is nothing to show but who it is.
         assert_eq!(entry.prompt, None);
         assert_eq!(entry.preview, None);
@@ -536,12 +543,12 @@ mod tests {
     fn hook_workspace_names_the_card() {
         let mut reported = signal("stop", now());
         reported.session_id = None;
-        reported.workspace_root = Some("/home/u/Projects/cue".into());
+        reported.workspace_root = Some("/home/u/Projects/que".into());
         let (probes, notices) = store();
         assert!(apply(&probes, &notices, reported));
         let raised = only(&notices);
-        assert_eq!(raised.project.as_deref(), Some("cue"));
-        assert_eq!(raised.cwd.as_deref(), Some("/home/u/Projects/cue"));
+        assert_eq!(raised.project.as_deref(), Some("que"));
+        assert_eq!(raised.cwd.as_deref(), Some("/home/u/Projects/que"));
     }
 
     #[test]
@@ -574,13 +581,13 @@ mod tests {
         let mut anonymous = signal("stop", now());
         anonymous.session_id = None;
         assert!(apply(&probes, &notices, anonymous));
-        assert_eq!(notices.lock().keys().next().map(String::as_str), Some("path:/home/u/Projects/cue"));
+        assert_eq!(notices.lock().keys().next().map(String::as_str), Some("path:/home/u/Projects/que"));
     }
 
     #[test]
     fn project_is_the_last_path_segment() {
-        assert_eq!(project_name("/home/u/Projects/cue").as_deref(), Some("cue"));
-        assert_eq!(project_name(r"C:\Users\u\Projects\cue\\").as_deref(), Some("cue"));
+        assert_eq!(project_name("/home/u/Projects/que").as_deref(), Some("que"));
+        assert_eq!(project_name(r"C:\Users\u\Projects\que\\").as_deref(), Some("que"));
         assert_eq!(project_name("/"), None);
     }
 

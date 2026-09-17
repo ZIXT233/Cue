@@ -10,7 +10,7 @@ export type NotificationDelivery = "tauri" | "service-worker" | "window" | null;
  */
 export function isTauriRuntime(): boolean {
   return typeof window !== "undefined"
-    && ("__TAURI_INTERNALS__" in window || "__TAURI__" in window || window.cueDesktop !== undefined);
+    && ("__TAURI_INTERNALS__" in window || "__TAURI__" in window || window.queDesktop !== undefined);
 }
 
 interface WindowNotificationLike {
@@ -96,15 +96,15 @@ export async function showBrowserNotification(
       });
       return "tauri";
     } catch (err) {
-      console.warn("[cue] native notification command failed:", err);
+      console.warn("[que] native notification command failed:", err);
       return null;
     }
   }
 
   const notificationOptions: NotificationOptions = {
     body: options.body,
-    icon: "/icons/cue-192.png",
-    // Cue owns the completion sound; the system notification is visual only.
+    icon: "/icons/que-192.png",
+    // Que owns the completion sound; the system notification is visual only.
     silent: true,
     ...(options.tag ? { tag: options.tag, renotify: true } : {}),
   };
@@ -129,7 +129,7 @@ export async function showBrowserNotification(
     notification.onclick = () => {
       notification.close();
       const desktop = typeof window !== "undefined"
-        ? (window as Window & { cueDesktop?: { openNotification?: (url: string) => void } }).cueDesktop
+        ? (window as Window & { queDesktop?: { openNotification?: (url: string) => void } }).queDesktop
         : undefined;
       if (desktop?.openNotification) {
         desktop.openNotification(options.sessionUrl);

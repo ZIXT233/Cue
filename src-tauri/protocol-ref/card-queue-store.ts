@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { EMPTY_QUEUE, type CardQueue } from "./card-queue.ts";
 import { notifyQueueChanged } from "./card-queue-live.ts";
 
-const queueFile = () => process.env.CUE_QUEUE_FILE || join(process.env.CUE_DATA_DIR || join(process.cwd(), ".cue"), "queue.json");
+const queueFile = () => process.env.QUE_QUEUE_FILE || join(process.env.QUE_DATA_DIR || join(process.cwd(), ".que"), "queue.json");
 const globalQueue = globalThis as typeof globalThis & { __cardQueueLock?: Promise<unknown> };
 
 // Writes replace the file atomically. A bootstrap reader can safely read the
@@ -34,7 +34,7 @@ export function withCardQueue<T>(action: (state: CardQueue) => Promise<T> | T, o
       state = structuredClone(EMPTY_QUEUE);
     }
     const before = JSON.stringify(state);
-    const desktopInstance = process.env.CUE_DESKTOP_INSTANCE;
+    const desktopInstance = process.env.QUE_DESKTOP_INSTANCE;
     if (desktopInstance) {
       for (const card of state.cards) {
         if (card.detached && !card.detached.owner.startsWith(`desktop:${desktopInstance}:`)) delete card.detached;

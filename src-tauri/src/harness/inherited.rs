@@ -1,8 +1,8 @@
-//! Whatever the CLI already had in the config file Cue has to write into.
+//! Whatever the CLI already had in the config file Que has to write into.
 //!
 //! Only the two harnesses whose config is *replaced* rather than extended share this:
 //! Gemini's defaults file and OpenCode's config env. Every harness-private guard or
-//! merge lives with the harness that needs it, under `adapters/`.
+//! merge lives with the harness that needs it, under `kinds/`.
 
 use crate::error::{AppError, AppResult};
 use crate::models::QueueWorkspace;
@@ -12,7 +12,7 @@ use std::path::PathBuf;
 
 pub async fn inherited_config(kind: &str, workspace: &QueueWorkspace, node: &str) -> AppResult<Map<String, Value>> {
     let text = if workspace.kind == "ssh" {
-        let host = workspace.ssh_host.as_deref().ok_or_else(|| AppError::msg("工作区不存在"))?;
+        let host = workspace.ssh_host.as_deref().ok_or_else(|| AppError::machine("WORKSPACE_MISSING"))?;
         let script = if kind == "opencode" {
             r#"process.stdout.write(process.env.OPENCODE_CONFIG_CONTENT||"{}");"#
         } else {
@@ -32,7 +32,7 @@ pub async fn inherited_config(kind: &str, workspace: &QueueWorkspace, node: &str
     let config: Value = serde_json::from_str(&text)?;
     match config {
         Value::Object(map) => Ok(map),
-        _ => Err(AppError::msg("无法读取现有 CLI 配置，未覆盖配置")),
+        _ => Err(AppError::machine("HARNESS_CONFIG_UNREADABLE")),
     }
 }
 

@@ -58,10 +58,10 @@ function DesktopWindowControls() {
 export function DesktopChrome() {
   const [desktop, setDesktop] = useState(false);
   useEffect(() => {
-    const bridge = (window as Window & { cueDesktop?: { platform?: string; setWindowTheme?: (dark: boolean) => void } }).cueDesktop;
+    const bridge = (window as Window & { queDesktop?: { platform?: string; setWindowTheme?: (dark: boolean) => void } }).queDesktop;
     if (!bridge) return;
     setDesktop(true);
-    document.documentElement.classList.add("cue-desktop");
+    document.documentElement.classList.add("que-desktop");
     document.documentElement.dataset.desktopPlatform = bridge.platform;
     const sync = () => bridge.setWindowTheme?.(document.documentElement.classList.contains("dark"));
     sync();

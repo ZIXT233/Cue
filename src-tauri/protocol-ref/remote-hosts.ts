@@ -4,8 +4,8 @@ import { homedir } from 'node:os';
 import { dirname, resolve, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 export interface RemoteHost { id: string; name: string; hostname: string; user?: string; port?: number; source: 'config' | 'web'; visible?: boolean; connected?: boolean; }
-const file = () => join(process.env.CUE_DATA_DIR || join(process.cwd(), '.cue'), 'remote-hosts.json');
-const visibilityFile = () => join(process.env.CUE_DATA_DIR || join(process.cwd(), '.cue'), 'remote-host-visibility.json');
+const file = () => join(process.env.QUE_DATA_DIR || join(process.cwd(), '.que'), 'remote-hosts.json');
+const visibilityFile = () => join(process.env.QUE_DATA_DIR || join(process.cwd(), '.que'), 'remote-host-visibility.json');
 export async function savedHosts(): Promise<RemoteHost[]> {
   try { return JSON.parse(await readFile(file(), 'utf8')); }
   catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return []; throw e; }

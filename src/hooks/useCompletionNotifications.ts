@@ -13,9 +13,9 @@ import type { CardQueue, QueueCard } from "@/lib/card-queue";
 import { notificationEnabledByDefault } from "@/lib/notification-preference";
 import { latestAssistantReply } from "@/lib/queue-arrival";
 
-const KEY = "cue:completion-notifications";
-const CHANGE_EVENT = "cue:completion-notifications-changed";
-const STATUS_EVENT = "cue:completion-notifications-status";
+const KEY = "que:completion-notifications";
+const CHANGE_EVENT = "que:completion-notifications-changed";
+const STATUS_EVENT = "que:completion-notifications-status";
 let permissionRequest: Promise<NotificationPermission> | null = null;
 let statusClearTimer: number | null = null;
 
@@ -58,11 +58,11 @@ export function useCompletionNotifications(queue: CardQueue | null) {
   useEffect(() => {
     if (!isTauriRuntime()) return;
     let dispose: (() => void) | undefined;
-    void listen<{ cardId: string | null; sessionUrl: string }>("cue://notification-response", (event) => {
+    void listen<{ cardId: string | null; sessionUrl: string }>("que://notification-response", (event) => {
       // The native callback is authoritative; cancel the focus heuristic.
       recentNativeToast.current = null;
       window.focus();
-      window.dispatchEvent(new CustomEvent("cue:notification-click", { detail: { url: event.payload.sessionUrl } }));
+      window.dispatchEvent(new CustomEvent("que:notification-click", { detail: { url: event.payload.sessionUrl } }));
     }).then((unlisten) => { dispose = unlisten; }).catch(() => {});
     return () => dispose?.();
   }, []);
@@ -80,7 +80,7 @@ export function useCompletionNotifications(queue: CardQueue | null) {
         const pending = recentNativeToast.current;
         if (!pending || pending.url !== recent.url) return;
         recentNativeToast.current = null;
-        window.dispatchEvent(new CustomEvent("cue:notification-click", { detail: { url: pending.url } }));
+        window.dispatchEvent(new CustomEvent("que:notification-click", { detail: { url: pending.url } }));
       }, 250);
     };
     window.addEventListener("focus", routeFromFocus);
@@ -147,11 +147,11 @@ export function useCompletionNotifications(queue: CardQueue | null) {
   const sendTestNotification = useCallback(async () => {
     try {
       const result = await showBrowserNotification({
-        title: "Cue",
+        title: "Que",
         body: t("settings.testNotificationSent"),
         sessionUrl: "/",
         cardId: "test",
-        tag: `cue:test:${Date.now()}`,
+        tag: `que:test:${Date.now()}`,
         onClick: () => {},
       });
       announceStatus(result ? t("settings.testNotificationSent") : t("settings.testNotificationFailed"));
@@ -163,7 +163,7 @@ export function useCompletionNotifications(queue: CardQueue | null) {
   }, [announceStatus, t]);
 
   const toggle = useCallback(async () => {
-    const desktop = (window as Window & { cueDesktop?: { requestNotifications?: () => Promise<string> } }).cueDesktop;
+    const desktop = (window as Window & { queDesktop?: { requestNotifications?: () => Promise<string> } }).queDesktop;
     if (desktop?.requestNotifications) {
       const next = !enabled;
       persistentStorage().setItem(KEY, String(next));
@@ -209,7 +209,7 @@ export function useCompletionNotifications(queue: CardQueue | null) {
     for (const card of completed) {
       const session = card.session;
       const url = card.detached ? `/?card=${encodeURIComponent(card.id)}` : `/?attention=${encodeURIComponent(card.id)}`;
-      const key = `cue:notified:${card.id}`;
+      const key = `que:notified:${card.id}`;
       const turn = JSON.stringify([session?.id ?? card.id, card.turnKey ?? card.readyAt]);
       // Serialize across the main window and detached tabs when Web Locks is available.
       const deliver = async () => {
@@ -246,11 +246,11 @@ export function useCompletionNotifications(queue: CardQueue | null) {
           body,
           sessionUrl: url,
           cardId: card.id,
-          tag: `cue:${card.id}`,
+          tag: `que:${card.id}`,
           onClick: () => {
             window.focus();
             // Soft-focus the card; location.assign would reload the whole queue.
-            window.dispatchEvent(new CustomEvent("cue:notification-click", { detail: { url } }));
+            window.dispatchEvent(new CustomEvent("que:notification-click", { detail: { url } }));
           },
         });
         if (result === "tauri") recentNativeToast.current = { url, at: Date.now() };
@@ -262,11 +262,11 @@ export function useCompletionNotifications(queue: CardQueue | null) {
   }, [queue, enabled, permission, t]);
 
   const openSystemSettings = useCallback(async () => {
-    const desktop = (window as Window & { cueDesktop?: { openNotificationSettings?: () => Promise<boolean> } }).cueDesktop;
+    const desktop = (window as Window & { queDesktop?: { openNotificationSettings?: () => Promise<boolean> } }).queDesktop;
     if (!desktop?.openNotificationSettings || !await desktop.openNotificationSettings()) {
       announceStatus(t("settings.notificationSystemSettingsFailed"));
     }
   }, [announceStatus, t]);
 
-  return { enabled, status, toggle, openSystemSettings, sendTestNotification, dismissStatus: () => announceStatus(""), canOpenSystemSettings: typeof window !== "undefined" && "cueDesktop" in window };
+  return { enabled, status, toggle, openSystemSettings, sendTestNotification, dismissStatus: () => announceStatus(""), canOpenSystemSettings: typeof window !== "undefined" && "queDesktop" in window };
 }

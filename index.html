@@ -4,13 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="google" content="notranslate" />
-    <title>Cue — Queue of Agent Cues</title>
+    <title>Que — Queue of Agent Cues</title>
     <script>
       (function () {
         var t = "auto";
         try {
-          var s = (window.cueDesktop && window.cueDesktop.storage
-            ? window.cueDesktop.storage
+          var s = (window.queDesktop && window.queDesktop.storage
+            ? window.queDesktop.storage
             : localStorage
           ).getItem("pi-theme");
           if (["light", "dark", "auto"].includes(s)) t = s;
@@ -20,7 +20,7 @@
         r.dataset.theme = t;
         r.classList.toggle("dark", t === "dark");
         if (window.__TAURI_INTERNALS__) {
-          r.classList.add("cue-desktop");
+          r.classList.add("que-desktop");
           r.dataset.desktopPlatform = /Mac/i.test(navigator.userAgent)
             ? "darwin"
             : /Win/i.test(navigator.userAgent)

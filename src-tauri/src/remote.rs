@@ -1,4 +1,4 @@
-//! Remote SSH transport, owned by Cue instead of shelled out to `ssh`.
+//! Remote SSH transport, owned by Que instead of shelled out to `ssh`.
 //!
 //! Historically every remote session spawned the system `ssh` binary inside a
 //! local ConPTY. That worked, but it made the remote pty's size a guess (the
@@ -19,7 +19,7 @@
 //!   are never cached in a side channel.
 //!
 //! `~/.ssh/known_hosts` stays the source of truth for host identity, which
-//! keeps Cue interoperable with the user's existing `ssh` trust decisions.
+//! keeps Que interoperable with the user's existing `ssh` trust decisions.
 
 use crate::error::{AppError, AppResult};
 use crate::models::RemoteHost;
@@ -45,7 +45,7 @@ const AUTH_TIMEOUT: Duration = Duration::from_secs(60);
 /// not try to satisfy.
 const KBI_ROUNDS: usize = 4;
 
-/// Everything needed to reach a host: the id Cue keys everything by, plus the
+/// Everything needed to reach a host: the id Que keys everything by, plus the
 /// resolved connection parameters.
 #[derive(Clone)]
 pub struct Target {
@@ -97,7 +97,7 @@ impl Target {
     }
 }
 
-/// Resolve a Cue host id — a saved host, or an alias from `~/.ssh/config` —
+/// Resolve a Que host id — a saved host, or an alias from `~/.ssh/config` —
 /// into connection parameters.
 pub fn resolve(id: &str) -> AppResult<Target> {
     let target = resolve_inner(id)?;
@@ -171,11 +171,11 @@ fn trust_prompt(host: &str, port: u16, key: &PublicKey) -> String {
 }
 
 /// Host identity normally lives in the user's own `~/.ssh/known_hosts`, which is
-/// what keeps Cue interoperable with the `ssh` they already use. `CUE_KNOWN_HOSTS`
+/// what keeps Que interoperable with the `ssh` they already use. `QUE_KNOWN_HOSTS`
 /// points verification at a different file instead — the end-to-end test relies
 /// on it so it never touches the real trust store.
 fn known_hosts_override() -> Option<PathBuf> {
-    std::env::var_os("CUE_KNOWN_HOSTS").map(PathBuf::from)
+    std::env::var_os("QUE_KNOWN_HOSTS").map(PathBuf::from)
 }
 
 fn verify_host(host: &str, port: u16, key: &PublicKey) -> Result<bool, russh::keys::Error> {
@@ -207,11 +207,11 @@ impl client::Handler for Client {
         let key = match server_public_key {
             PublicKeyOrCertificate::PublicKey { key, .. } => key,
             // A CA-signed host certificate cannot be pinned in known_hosts the
-            // way a bare key can, and Cue has no `@cert-authority` config, so
+            // way a bare key can, and Que has no `@cert-authority` config, so
             // silently trusting it would be a downgrade. Refuse, and say why.
             PublicKeyOrCertificate::Certificate(certificate) => {
                 let reason = format!(
-                    "{} presented a host certificate ({}), which Cue cannot pin yet. Connect once with ssh to record the host key.",
+                    "{} presented a host certificate ({}), which Que cannot pin yet. Connect once with ssh to record the host key.",
                     self.host,
                     certificate.algorithm()
                 );
@@ -290,7 +290,7 @@ fn pool() -> &'static AsyncMutex<HashMap<String, Pooled>> {
     POOL.get_or_init(|| AsyncMutex::new(HashMap::new()))
 }
 
-/// The pooled session for a Cue host id, connecting if it is not up yet.
+/// The pooled session for a Que host id, connecting if it is not up yet.
 pub async fn session_with(host: &str, password: Option<String>, accept: Option<String>) -> AppResult<Arc<Session>> {
     let target = resolve(host)?;
     connect_pooled(&target, password, accept).await
@@ -400,7 +400,7 @@ async fn connect(target: &Target, password: Option<String>, accept: Option<Strin
     }
 }
 
-/// Whether Cue currently holds an authenticated connection to `host`.
+/// Whether Que currently holds an authenticated connection to `host`.
 pub async fn is_connected(host: &str) -> bool {
     let Ok(target) = resolve(host) else { return false };
     let guard = pool().lock().await;
@@ -636,7 +636,7 @@ fn code_from_text(text: &str) -> &'static str {
     }
 }
 
-/// Map a remote command's stderr into Cue's machine codes. Only the directory
+/// Map a remote command's stderr into Que's machine codes. Only the directory
 /// case needs one — remote browsing and workspace validation both depend on
 /// telling "no such directory" apart from "the host went away".
 fn exec_error(stderr: &[u8], code: i32) -> AppError {
@@ -769,7 +769,7 @@ where
 /// One-shot command over the pooled connection, no pty.
 ///
 /// Note on locale: a non-tty exec gets no locale from the server, so a remote
-/// `ls` can hand back `?` where a filename had CJK. Cue deliberately does not
+/// `ls` can hand back `?` where a filename had CJK. Que deliberately does not
 /// override `LANG` here — that stays a server-side setting, same as it was when
 /// the system `ssh` client ran the command.
 pub async fn exec(host: &str, command: &str, stdin: &[u8]) -> AppResult<Vec<u8>> {
@@ -970,7 +970,7 @@ mod tests {
             }
         });
         let target = Target {
-            id: format!("cue-test-{port}"),
+            id: format!("que-test-{port}"),
             hostname: "127.0.0.1".into(),
             user: "tester".into(),
             port,
@@ -998,9 +998,9 @@ mod tests {
     #[tokio::test]
     async fn drives_a_real_ssh_session() {
         let (target, recorded) = start_server().await;
-        let store = std::env::temp_dir().join(format!("cue-known-hosts-{}", std::process::id()));
+        let store = std::env::temp_dir().join(format!("que-known-hosts-{}", std::process::id()));
         let _ = std::fs::remove_file(&store);
-        std::env::set_var("CUE_KNOWN_HOSTS", &store);
+        std::env::set_var("QUE_KNOWN_HOSTS", &store);
 
         // An unknown host key must stop, and hand back the fingerprint to confirm.
         let failure = match connect_target(&target, Some(PASSWORD.into()), None).await {
@@ -1078,12 +1078,12 @@ mod tests {
         // the pane has, forward keystrokes, turn a resize into a window-change,
         // and hang the remote job up when the tab closes. No local pty and no
         // `ssh.exe` take part anywhere in it.
-        let hosts = std::env::temp_dir().join(format!("cue-remote-hosts-{}.json", std::process::id()));
+        let hosts = std::env::temp_dir().join(format!("que-remote-hosts-{}.json", std::process::id()));
         std::fs::write(
             &hosts,
             serde_json::to_string(&[crate::models::RemoteHost {
                 id: target.id.clone(),
-                name: "cue test host".into(),
+                name: "que test host".into(),
                 hostname: target.hostname.clone(),
                 user: Some(target.user.clone()),
                 port: Some(target.port),
@@ -1092,10 +1092,10 @@ mod tests {
                 visible: None,
                 connected: None,
             }])
-            .expect("serialize the host Cue resolves"),
+            .expect("serialize the host Que resolves"),
         )
-        .expect("write the host Cue resolves");
-        std::env::set_var("CUE_REMOTE_HOSTS", &hosts);
+        .expect("write the host Que resolves");
+        std::env::set_var("QUE_REMOTE_HOSTS", &hosts);
 
         let hub = crate::terminal::TerminalHub::new(crate::live::LiveBus::new());
         let side = "cccccccccccccccccccccccccccccccc";
@@ -1132,8 +1132,8 @@ mod tests {
             wait_for(move || recorded.lock().hung_up > 0, "the remote job to be hung up").await;
         }
 
-        std::env::remove_var("CUE_REMOTE_HOSTS");
-        std::env::remove_var("CUE_KNOWN_HOSTS");
+        std::env::remove_var("QUE_REMOTE_HOSTS");
+        std::env::remove_var("QUE_KNOWN_HOSTS");
         let _ = std::fs::remove_file(&hosts);
         let _ = std::fs::remove_file(&store);
     }

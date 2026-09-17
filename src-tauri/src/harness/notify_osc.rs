@@ -157,7 +157,7 @@ impl KittyNotifyProbe {
 /// Cursor looks at `KITTY_WINDOW_ID` before `WT_SESSION` / `TERM_PROGRAM`.
 pub fn prefer_kitty_notifications(env: &mut HashMap<String, String>) {
     env.retain(|key, _| !key.eq_ignore_ascii_case("GHOSTTY_RESOURCES_DIR"));
-    env.insert("KITTY_WINDOW_ID".into(), "cue".into());
+    env.insert("KITTY_WINDOW_ID".into(), "que".into());
 }
 
 pub fn observe_notify(current: ProbeState, notify: &TerminalNotify, at: i64) -> ProbeState {

@@ -1,13 +1,13 @@
 [package]
-name = "cue"
+name = "que"
 version = "0.1.0"
 description = "Queue of Agent Cues"
-authors = ["Cue"]
+authors = ["Que"]
 edition = "2021"
-default-run = "cue"
+default-run = "que"
 
 [lib]
-name = "cue_lib"
+name = "que_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

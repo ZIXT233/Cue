@@ -8,9 +8,9 @@ pub struct HookOscProbe {
 }
 
 /// Must stay in sync with the prefix harness-hook.cjs writes:
-/// `\x1b]777;cue;<base64>\x07`. Derive every offset from this constant — a
+/// `\x1b]777;que;<base64>\x07`. Derive every offset from this constant — a
 /// rename that forgets the hardcoded index silently drops every signal.
-const MARKER: &str = "\x1b]777;cue;";
+const MARKER: &str = "\x1b]777;que;";
 
 impl HookOscProbe {
     pub fn new(token: String) -> Self {
@@ -77,19 +77,19 @@ mod tests {
         let _ = take_suffix(&text, MARKER.len());
         let mut probe = HookOscProbe::new("token".into());
         assert!(probe.push(&text).is_none());
-        assert!(probe.push(&format!("{text}\x1b]777;cue;")).is_none());
+        assert!(probe.push(&format!("{text}\x1b]777;que;")).is_none());
     }
 
     #[test]
-    fn parses_a_cue_signal() {
+    fn parses_a_que_signal() {
         let mut probe = HookOscProbe::new("token".into());
-        let signal = probe.push(&format!("noise\x1b]777;cue;{}\x07trailing", encode("token", "Stop"))).expect("marker length must match the encoded slice");
+        let signal = probe.push(&format!("noise\x1b]777;que;{}\x07trailing", encode("token", "Stop"))).expect("marker length must match the encoded slice");
         assert_eq!(signal.event, "Stop");
     }
 
     #[test]
     fn parses_a_signal_split_across_chunks() {
-        let frame = format!("\x1b]777;cue;{}\x07", encode("token", "PreToolUse"));
+        let frame = format!("\x1b]777;que;{}\x07", encode("token", "PreToolUse"));
         let mut probe = HookOscProbe::new("token".into());
         let mut signal = None;
         for (index, chunk) in frame.chars().collect::<Vec<_>>().chunks(7).map(|c| c.iter().collect::<String>()).enumerate() {
@@ -102,6 +102,6 @@ mod tests {
     #[test]
     fn rejects_a_foreign_token() {
         let mut probe = HookOscProbe::new("token".into());
-        assert!(probe.push(&format!("\x1b]777;cue;{}\x07", encode("other", "Stop"))).is_none());
+        assert!(probe.push(&format!("\x1b]777;que;{}\x07", encode("other", "Stop"))).is_none());
     }
 }

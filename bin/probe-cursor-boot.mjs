@@ -9,7 +9,7 @@
 //
 // It measures spawn -> first-byte only. It does NOT measure "-> hook", because
 // a hook needs a real interactive session and a real prompt; that leg comes from
-// Cue's own logs (`first hook after Nms`). This script answers one narrow
+// Que's own logs (`first hook after Nms`). This script answers one narrow
 // question: does the CLI's own bootstrap change when the network does?
 //
 //   node bin/probe-cursor-boot.mjs

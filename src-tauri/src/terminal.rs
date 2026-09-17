@@ -769,7 +769,7 @@ fn deliver(inner: &Mutex<HashMap<String, Record>>, id: &str, probe: &Arc<Mutex<P
         // First real byte out of the CLI. Everything before this instant was the
         // CLI booting; everything after it is the CLI working. Logged once per
         // terminal so `pty spawn` -> `first byte` -> `starting->attention` line
-        // up in cue.log and each leg gets an owner instead of one 22s mystery.
+        // up in que.log and each leg gets an owner instead of one 22s mystery.
         {
             let mut probe = lock(probe);
             probe.chunks += 1;
@@ -945,8 +945,8 @@ mod tests {
     #[test]
     fn cwd_and_subscribe_fall_back_to_transcript() {
         let _guard = ENV.lock().unwrap();
-        let dir = std::env::temp_dir().join(format!("cue-term-{}", uuid::Uuid::new_v4().simple()));
-        std::env::set_var("CUE_DATA_DIR", &dir);
+        let dir = std::env::temp_dir().join(format!("que-term-{}", uuid::Uuid::new_v4().simple()));
+        std::env::set_var("QUE_DATA_DIR", &dir);
         let id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         save_terminal_transcript(id, &TerminalTranscript {
             cwd: "/work".into(),
@@ -967,7 +967,7 @@ mod tests {
             _ => panic!("expected replayed output"),
         }
         let _ = std::fs::remove_dir_all(dir);
-        std::env::remove_var("CUE_DATA_DIR");
+        std::env::remove_var("QUE_DATA_DIR");
     }
 
     #[test]
