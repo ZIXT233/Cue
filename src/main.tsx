@@ -34,8 +34,13 @@ function installDesktopBridge() {
       window.dispatchEvent(new CustomEvent("que:notification-click", { detail: { url } }));
     },
     requestNotifications: async () => {
-      if (await isPermissionGranted()) return "granted";
-      return requestPermission();
+      try {
+        const granted = await invoke<boolean>("request_notification_permission");
+        return granted ? "granted" : "denied";
+      } catch {
+        if (await isPermissionGranted()) return "granted";
+        return requestPermission();
+      }
     },
     openNotificationSettings: async () => {
       // The Rust command bypasses the opener plugin's frontend URL scope,

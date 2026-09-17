@@ -955,6 +955,30 @@ html.dark .cq-remind-countdown{color:#e2c57e}
   overflow:hidden;
   text-overflow:ellipsis;
 }
+.cq-external-footer-jump-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 7px;
+  border: 1px solid color-mix(in srgb, var(--cq-external-blue, #268bd2) 40%, transparent);
+  background: color-mix(in srgb, var(--cq-external-blue, #268bd2) 20%, var(--cq-paper));
+  color: color-mix(in srgb, var(--cq-external-blue, #268bd2) 90%, #0e293c);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-left: auto;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+.cq-external-footer-jump-btn:hover {
+  background: color-mix(in srgb, var(--cq-external-blue, #268bd2) 32%, var(--cq-paper));
+  border-color: color-mix(in srgb, var(--cq-external-blue, #268bd2) 65%, transparent);
+}
+.cq-external-footer-jump-btn:active {
+  transform: scale(0.97);
+}
 @media(max-width:700px){
   .cq-external-notice-bar{
     flex-direction:column;
@@ -1120,6 +1144,8 @@ html.dark .cq-card-branches .cq-branch-trigger { background: #2d332b !important;
 .cq-title-environment b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; font-weight: 600; }
 .cq-title-host { max-width: 180px; }
 .cq-title-workspace { max-width: 260px; }
+button.cq-title-workspace-btn { background: transparent; border: 0; padding: 0; font: inherit; cursor: pointer; }
+button.cq-title-workspace-btn:hover b { text-decoration: underline; }
 .cq-environment-tooltip { display: grid; gap: 7px; min-width: 220px; font-size: 13px; }
 .cq-environment-tooltip > span { display: flex; align-items: center; gap: 7px; font-weight: 600; }
 .cq-environment-tooltip small { overflow-wrap: anywhere; color: #788178; font-size: 11px; }
@@ -1513,6 +1539,16 @@ html.dark .cq-external-notice-primary {
 }
 html.dark .cq-external-notice-secondary {
   color: var(--cq-muted);
+}
+html.dark .cq-external-footer-jump-btn {
+  background: color-mix(in srgb, var(--cq-external-blue, #3ba2eb) 20%, var(--cq-paper));
+  border-color: color-mix(in srgb, var(--cq-external-blue, #3ba2eb) 45%, var(--cq-line));
+  color: #a5d8ff;
+}
+html.dark .cq-external-footer-jump-btn:hover {
+  background: color-mix(in srgb, var(--cq-external-blue, #3ba2eb) 30%, var(--cq-paper));
+  border-color: var(--cq-external-blue, #3ba2eb);
+  color: #d0ebff;
 }
 html.dark .cq-external-message[data-role="user"] {
   background: color-mix(in srgb, var(--cq-external-blue, #3ba2eb) 20%, transparent);

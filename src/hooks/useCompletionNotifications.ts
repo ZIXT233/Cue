@@ -3,6 +3,7 @@
 import { persistentStorage } from "../lib/persistent-storage.ts";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 import { listen } from "@tauri-apps/api/event";
 import { useI18n } from "@/hooks/useI18n";
@@ -22,16 +23,30 @@ let statusClearTimer: number | null = null;
 /**
  * Current notification permission across both runtimes. In the Tauri WebView
  * the web Notification API never reaches "granted" (missing in WKWebView,
- * unusable in WebView2), so the native plugin state is the source of truth.
+ * unusable in WebView2), so the native plugin/system state is the source of truth.
  */
 async function currentPermissionState(): Promise<NotificationPermission | "unsupported"> {
-  if (isTauriRuntime()) return (await isPermissionGranted()) ? "granted" : "default";
+  if (isTauriRuntime()) {
+    try {
+      const granted = await invoke<boolean>("check_notification_permission");
+      return granted ? "granted" : "default";
+    } catch {
+      return (await isPermissionGranted()) ? "granted" : "default";
+    }
+  }
   if (typeof window === "undefined" || !("Notification" in window)) return "unsupported";
   return Notification.permission;
 }
 
 async function requestPermissionOnce(): Promise<NotificationPermission> {
-  if (isTauriRuntime()) return requestPermission();
+  if (isTauriRuntime()) {
+    try {
+      const granted = await invoke<boolean>("request_notification_permission");
+      return granted ? "granted" : "denied";
+    } catch {
+      return requestPermission();
+    }
+  }
   if (typeof window === "undefined" || !("Notification" in window)) return "denied";
   if (Notification.permission !== "default") return Notification.permission;
   permissionRequest ??= Notification.requestPermission().finally(() => { permissionRequest = null; });

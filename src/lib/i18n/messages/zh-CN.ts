@@ -89,7 +89,7 @@ export const zhCNLocale: LocalePlugin = {
     "external.finished": "外部会话的通知，处理后自动移出队列",
     "external.openInEditor": "前往 {name}",
     "external.footerBadge": "外部通知",
-    "external.footerManual": "无自动跳转，请手动进入 {name} 回复",
+    "external.footerManual": "点击「前往 {name}」或切换至该应用回复",
     "external.footerAutoDismiss": "在 {name} 回复后，此卡片将自动离开队列",
 
     "system.projectInstructions": "项目指令",

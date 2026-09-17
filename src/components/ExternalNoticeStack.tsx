@@ -1,6 +1,7 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "@/hooks/useI18n";
 import { copyText } from "@/lib/clipboard";
 import { externalNoticeTitle, type ExternalNotice, type ExternalTurn } from "@/lib/card-queue";
@@ -111,6 +112,18 @@ export function ExternalSessionCard({ notice, isFront, host, folder, directory, 
     }
   }, [notice.id, transcript.length]);
 
+  const handleFocusWindow = useCallback(async () => {
+    try {
+      await invoke("focus_external_window", {
+        kind: notice.kind,
+        project: notice.project || folder || "",
+        cwd: notice.cwd || directory || "",
+      });
+    } catch (e) {
+      console.warn("[que] focus_external_window failed:", e);
+    }
+  }, [notice.kind, notice.project, notice.cwd, folder, directory]);
+
   return (
     <article aria-hidden={!isFront} inert={!isFront} className="cq-large-card cq-continuous-card cq-external-card"
       data-phase={isWorking ? "working" : "attention"} data-external-harness={notice.kind} data-card-id={`external:${notice.id}`}>
@@ -129,15 +142,29 @@ export function ExternalSessionCard({ notice, isFront, host, folder, directory, 
                 <WorkspaceMachineIcon name="local" size={15} /><b>{host}</b>
               </span>
               {folder && <ScoreChipTooltip text={<div className="cq-environment-tooltip"><span><WorkspaceMachineIcon name="folder" size={14} />{folder}</span><small>{directory || folder}</small></div>}>
-                <span className="cq-title-environment cq-title-workspace" aria-label={folder}>
+                <button
+                  type="button"
+                  className="cq-title-environment cq-title-workspace cq-title-workspace-btn"
+                  aria-label={`${folder} · ${t("external.openInEditor", { name: harness })}`}
+                  onClick={() => { void handleFocusWindow(); }}
+                >
                   <WorkspaceMachineIcon name="folder" size={15} /><b>{folder}</b>
-                </span>
+                </button>
               </ScoreChipTooltip>}
             </div>
           </div>
         </div>
         <ExternalHarnessHeaderBadge kind={notice.kind} title={harness} />
         <div className="cq-card-actions">
+          <button
+            type="button"
+            className="cq-action-popout"
+            aria-label={t("external.openInEditor", { name: harness })}
+            title={t("external.openInEditor", { name: harness })}
+            onClick={() => { void handleFocusWindow(); }}
+          >
+            <Icon name="out" /><span className="cq-action-tooltip" role="tooltip">{t("external.openInEditor", { name: harness })}</span>
+          </button>
           <button type="button" className="cq-action-archive" aria-label={t(isWorking ? "queue.关闭" : "external.dismiss")} onClick={onDismiss}>
             <Icon name="close" /><span className="cq-action-tooltip" role="tooltip">{t(isWorking ? "queue.关闭" : "external.dismiss")}</span>
           </button>
@@ -192,6 +219,15 @@ export function ExternalSessionCard({ notice, isFront, host, folder, directory, 
             {t("external.footerAutoDismiss", { name: harness })}
           </p>
         </div>
+        <button
+          type="button"
+          className="cq-external-footer-jump-btn"
+          onClick={() => { void handleFocusWindow(); }}
+          aria-label={t("external.openInEditor", { name: harness })}
+        >
+          <span>{t("external.openInEditor", { name: harness })}</span>
+          <Icon name="out" size={13} />
+        </button>
       </footer>
     </article>
   );

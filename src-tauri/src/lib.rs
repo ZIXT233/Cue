@@ -4,6 +4,7 @@ mod cwd;
 mod conpty;
 mod dev_tools;
 mod error;
+mod focus;
 mod harness;
 mod hosts;
 mod live;
@@ -118,7 +119,16 @@ pub fn run() {
             notify::init(&app.handle().clone());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![api_base, open_devtools, reveal_log, notify::send_completion_notification, notify::open_notification_settings])
+        .invoke_handler(tauri::generate_handler![
+            api_base,
+            open_devtools,
+            reveal_log,
+            notify::send_completion_notification,
+            notify::open_notification_settings,
+            notify::request_notification_permission,
+            notify::check_notification_permission,
+            focus::focus_external_window,
+        ])
         .build(tauri::generate_context!())
         .expect("error while building Que")
         .run(|app, event| {

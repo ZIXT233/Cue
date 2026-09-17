@@ -48,7 +48,42 @@ mod native {
         if let Err(err) = registered {
             crate::debuglog::warn("notify", &format!("response registration failed: {err:?}"));
         }
+        let mgr = manager.clone();
         let _ = MANAGER.set(manager);
+
+        // Explicitly request notification authorization on macOS.
+        // On macOS UNUserNotificationCenter, calling this will prompt the user
+        // on the first run; subsequent calls return the user's decision without re-prompting.
+        tauri::async_runtime::spawn(async move {
+            match mgr.first_time_ask_for_notification_permission().await {
+                Ok(granted) => {
+                    crate::debuglog::info("notify", &format!("authorization requested: granted={granted}"));
+                }
+                Err(err) => {
+                    crate::debuglog::warn("notify", &format!("authorization request error: {err:?}"));
+                }
+            }
+        });
+    }
+
+    pub async fn request_permission() -> Result<bool, String> {
+        let Some(manager) = MANAGER.get() else {
+            return Err("notification manager unavailable".into());
+        };
+        manager
+            .first_time_ask_for_notification_permission()
+            .await
+            .map_err(|e| format!("{e:?}"))
+    }
+
+    pub async fn check_permission() -> Result<bool, String> {
+        let Some(manager) = MANAGER.get() else {
+            return Err("notification manager unavailable".into());
+        };
+        manager
+            .get_notification_permission_state()
+            .await
+            .map_err(|e| format!("{e:?}"))
     }
 
     pub async fn send(
@@ -60,6 +95,17 @@ mod native {
         let Some(manager) = MANAGER.get() else {
             return Err("notification manager unavailable".into());
         };
+        // Ensure authorization has been requested at least once before sending
+        match manager.get_notification_permission_state().await {
+            Ok(true) => {}
+            Ok(false) => {
+                crate::debuglog::info_card("notify", card_id, None, "permission not yet granted, requesting authorization");
+                let _ = manager.first_time_ask_for_notification_permission().await;
+            }
+            Err(err) => {
+                crate::debuglog::warn_card("notify", card_id, None, &format!("failed reading permission state: {err:?}"));
+            }
+        }
         let mut user_info = HashMap::new();
         user_info.insert("cardId".to_string(), card_id.to_string());
         user_info.insert("sessionUrl".to_string(), session_url.to_string());
@@ -147,3 +193,22 @@ pub async fn send_completion_notification(
     crate::debuglog::info_card("notify", &card_id, None, "sent plugin");
     Ok(())
 }
+
+/// Explicitly request notification permission from the OS.
+#[tauri::command]
+pub async fn request_notification_permission() -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    return native::request_permission().await;
+    #[cfg(not(target_os = "macos"))]
+    Ok(true)
+}
+
+/// Check whether the OS has granted notification permission.
+#[tauri::command]
+pub async fn check_notification_permission() -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    return native::check_permission().await;
+    #[cfg(not(target_os = "macos"))]
+    Ok(true)
+}
+

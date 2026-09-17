@@ -89,7 +89,7 @@ export const zhTWLocale: LocalePlugin = {
     "external.finished": "外部會話的通知，處理後自動移出佇列",
     "external.openInEditor": "前往 {name}",
     "external.footerBadge": "外部通知",
-    "external.footerManual": "無自動跳轉，請手動進入 {name} 回覆",
+    "external.footerManual": "點擊「前往 {name}」或切換至該應用回覆",
     "external.footerAutoDismiss": "在 {name} 回覆後，此卡片將自動離開佇列",
 
     "system.projectInstructions": "項目指令",

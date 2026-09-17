@@ -89,7 +89,7 @@ export const enLocale: LocalePlugin = {
     "external.finished": "External session notice, automatically removed from queue once handled",
     "external.openInEditor": "Open in {name}",
     "external.footerBadge": "External notice",
-    "external.footerManual": "No auto-jump, please switch to {name} to reply",
+    "external.footerManual": "Click “Open in {name}” or switch to the app to reply",
     "external.footerAutoDismiss": "After replying in {name}, this card will leave the queue automatically",
 
     "system.projectInstructions": "Project instructions",
