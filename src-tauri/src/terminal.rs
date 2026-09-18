@@ -551,6 +551,16 @@ impl TerminalHub {
             (record.channel.clone(), record.probe.clone())
         };
         let started = Instant::now();
+        // OSC 10/11 color-query experiment: log the payload as the backend
+        // received it via POST, before it enters the channel queue, so the
+        // bytes can be compared with the frontend's http-post line.
+        if data.contains("\x1b]") {
+            let t = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0);
+            crate::debuglog::debug_term("osc", id, &format!("hub-write t={t} {}B: {}", data.len(), crate::remote::hex_prefix(data.as_bytes(), 512)));
+        }
         let ok = channel.write(data.as_bytes());
         let elapsed = started.elapsed().as_millis() as u64;
         let mut probe = lock(&probe);

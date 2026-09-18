@@ -668,10 +668,25 @@ pub enum PtyCommand {
 }
 
 /// Hex preview of bytes for the wire-level log; never dumps the whole payload.
-fn hex_prefix(bytes: &[u8], max: usize) -> String {
+pub(crate) fn hex_prefix(bytes: &[u8], max: usize) -> String {
     let shown: Vec<String> = bytes.iter().take(max).map(|b| format!("{b:02x}")).collect();
     let suffix = if bytes.len() > max { "…" } else { "" };
     format!("{}{suffix}", shown.join(" "))
+}
+
+/// OSC 10/11 color-query experiment: chunks that carry an OSC sequence get a
+/// full hex dump plus an epoch-ms timestamp that lines up with the frontend
+/// `osc` lines; everything else keeps the short preview.
+fn wire_trace(direction: &str, bytes: &[u8]) {
+    if !bytes.windows(2).any(|w| w == b"\x1b]") {
+        crate::debuglog::trace("pty", &format!("{direction} {}B: {}", bytes.len(), hex_prefix(bytes, 48)));
+        return;
+    }
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    crate::debuglog::debug("osc", &format!("{direction} t={t} {}B: {}", bytes.len(), hex_prefix(bytes, 512)));
 }
 
 /// Drive a remote login/command session for its whole lifetime.
@@ -721,7 +736,7 @@ where
         tokio::select! {
             message = reader.wait() => match message {
                 Some(ChannelMsg::Data { data }) => {
-                    crate::debuglog::trace("pty", &format!("remote <- {}B: {}", data.len(), hex_prefix(&data, 48)));
+                    wire_trace("remote <-", &data);
                     sink(data.to_vec());
                 }
                 // A pty normally folds stderr into stdout; an exec channel does
@@ -739,7 +754,7 @@ where
             },
             command = commands.recv() => match command {
                 Some(PtyCommand::Data(bytes)) => {
-                    crate::debuglog::trace("pty", &format!("remote -> {}B: {}", bytes.len(), hex_prefix(&bytes, 48)));
+                    wire_trace("remote ->", &bytes);
                     if writer.data_bytes(bytes).await.is_err() {
                         end_reason = "write failed (channel gone)";
                         break;

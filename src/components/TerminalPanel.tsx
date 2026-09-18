@@ -11,7 +11,7 @@ import { Terminal } from "@xterm/xterm";
 import { useI18n } from "@/hooks/useI18n";
 import { createTerminalWriter, isTerminalAbortError, terminalRequest } from "@/lib/terminal-client";
 import { setXtermProbe } from "@/lib/terminal-probe";
-import { appLog } from "@/lib/app-log";
+import { appLog, oscTrace } from "@/lib/app-log";
 import { MAX_ATTACHED_IMAGE_BYTES, MAX_ATTACHED_IMAGES } from "@/lib/image-attachments";
 import type { TerminalEvent } from "@/lib/terminal-manager";
 import type { TerminalTab } from "./terminal-tab-state";
@@ -271,7 +271,9 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
     // `?`. Set requests (no `?`) still reach xterm so apps that repaint their
     // canvas keep working. This also silences backlogs: a replayed `10;?`
     // re-triggers the report path the same way a live one does.
-    if (conptyHost) {
+    const swallowColorQueries = conptyHost || !harnessKind || harnessKind === "shell";
+    appLog("debug", "osc", `panel-mount swallow=${swallowColorQueries} harnessKind=${harnessKind ?? "none"} conpty=${conptyHost}`, { card: cardId, term: id });
+    if (swallowColorQueries) {
       const isColorQuery = (data: string) => data.includes("?");
       for (const ident of [4, 10, 11, 12]) terminal.parser.registerOscHandler(ident, isColorQuery);
     }
@@ -390,6 +392,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
     container.addEventListener("dragleave", dragLeave);
     container.addEventListener("drop", drop);
     const onData = terminal.onData((data) => {
+      oscTrace("xterm-onData", data, { card: cardId, term: id });
       sendInput(data);
     });
     const fitAndResize = () => {
@@ -466,6 +469,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
     };
     liveControlRef.current = setLive;
     const enqueueOutput = (event: Extract<TerminalEvent, { type: "output" }>) => {
+      oscTrace("sse-recv", event.data, { card: cardId, term: id });
       hideConptyCursor();
       if (focusReportingRef.current && event.data.includes("\x1b[?1004h")) {
         focusArmedRef.current = true;

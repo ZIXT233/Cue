@@ -1,3 +1,5 @@
+import { oscTrace } from "./app-log";
+
 export function isTerminalAbortError(error: unknown) {
   return (error instanceof DOMException && error.name === "AbortError")
     || (error instanceof Error && /abort/i.test(error.message));
@@ -22,6 +24,11 @@ export function createTerminalWriter(id: string, onError: (error: Error) => void
     pending = pending.then(async () => {
       if (body === bufferedInput) bufferedInput = null;
       const payload = typeof body === "function" ? await body() : body;
+      // OSC color-query experiment: dump what is actually about to go over
+      // the wire, after any keystroke coalescing, right before the POST.
+      if (!(payload instanceof FormData) && payload.type === "input" && typeof payload.data === "string") {
+        oscTrace("http-post", payload.data, { term: id });
+      }
       const multipart = payload instanceof FormData;
       await terminalRequest(`/api/terminal/${encodeURIComponent(id)}`, {
         method: "POST",
