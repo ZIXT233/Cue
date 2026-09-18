@@ -260,6 +260,21 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       if (text !== null) void copyText(text).catch(() => { if (!disposed) setClipboardPending(text); });
       return true;
     });
+    // ConPTY cannot consume color-query replies on its input side: the bytes are
+    // handed to the CLI as key events, and its input box renders them as literal
+    // text — the `› ]10;rgb:…\]11;rgb:…\` garbage. xterm answers `OSC 10;?` /
+    // `11;?` / `12;?` / `4;n;?` probes with the theme's colors, so swallow the
+    // query at the parser: no reply is ever generated, and the CLI falls through
+    // to TERM / COLORFGBG, which the spawn env already sets. Same policy as the
+    // DA1 filter on sendInput. The handler payload excludes the `10;` prefix —
+    // a bare query arrives as `?` (or `n;?` for OSC 4) — so the test is just for
+    // `?`. Set requests (no `?`) still reach xterm so apps that repaint their
+    // canvas keep working. This also silences backlogs: a replayed `10;?`
+    // re-triggers the report path the same way a live one does.
+    if (conptyHost) {
+      const isColorQuery = (data: string) => data.includes("?");
+      for (const ident of [4, 10, 11, 12]) terminal.parser.registerOscHandler(ident, isColorQuery);
+    }
     // WebGL draws the caret into the canvas, so ConPTY cursor hiding needs DOM.
     let gpu: import("@xterm/addon-webgl").WebglAddon | undefined;
     let gpuLoss: { dispose(): void } | undefined;
