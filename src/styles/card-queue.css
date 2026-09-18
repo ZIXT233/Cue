@@ -1143,13 +1143,36 @@ html.dark .cq-card-branches .cq-branch-trigger { background: #2d332b !important;
 .cq-title-environment svg { flex: 0 0 auto; }
 .cq-title-environment b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; font-weight: 600; }
 .cq-title-host { max-width: 180px; }
+.cq-title-host:has(.cq-tmux-badge) { max-width: 240px; }
+.cq-tmux-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  line-height: 1;
+  padding: 1.5px 5px;
+  border-radius: 4px;
+  background: rgba(34, 197, 94, 0.12);
+  color: #16a34a;
+  border: 1px solid rgba(34, 197, 94, 0.32);
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  user-select: none;
+  flex-shrink: 0;
+}
+html.dark .cq-tmux-badge {
+  background: rgba(34, 197, 94, 0.18);
+  color: #4ade80;
+  border-color: rgba(74, 222, 128, 0.35);
+}
 .cq-title-workspace { max-width: 260px; }
 button.cq-title-workspace-btn { background: transparent; border: 0; padding: 0; font: inherit; cursor: pointer; }
 button.cq-title-workspace-btn:hover b { text-decoration: underline; }
 .cq-environment-tooltip { display: grid; gap: 7px; min-width: 220px; font-size: 13px; }
 .cq-environment-tooltip > span { display: flex; align-items: center; gap: 7px; font-weight: 600; }
 .cq-environment-tooltip small { overflow-wrap: anywhere; color: #788178; font-size: 11px; }
-@media (max-width: 700px) { .cq-title-primary { gap: 6px; }.cq-title-controls { gap: 4px; margin-left: 7px; }.cq-card-title-row h2,.cq-detached .cq-card-title-row h2 { max-width: 38%; }.cq-title-environment { gap: 6px; font-size: 12px; }.cq-title-host { max-width: 90px; }.cq-title-workspace { max-width: 118px; } }
+@media (max-width: 700px) { .cq-title-primary { gap: 6px; }.cq-title-controls { gap: 4px; margin-left: 7px; }.cq-card-title-row h2,.cq-detached .cq-card-title-row h2 { max-width: 38%; }.cq-title-environment { gap: 6px; font-size: 12px; }.cq-title-host { max-width: 90px; }.cq-title-host:has(.cq-tmux-badge) { max-width: 140px; }.cq-title-workspace { max-width: 118px; } }
 .cq-title-branches .cq-branch-trigger { width: auto !important; padding: 0 7px !important; justify-content: center; border: 0 !important; background: transparent !important; color: var(--cq-muted) !important; font-size: 11px; }
 .cq-title-branches .cq-branch-trigger:hover,.cq-title-branches .cq-branch-trigger[aria-pressed=true] { background: var(--cq-line) !important; color: var(--cq-ink) !important; }
 .cq-tools-trigger { display: flex; align-items: center; justify-content: center; gap: 3px; height: 26px; padding: 0 4px; border: 0; border-radius: 6px; background: transparent; color: var(--cq-muted); font: inherit; font-size: 11px; white-space: nowrap; }

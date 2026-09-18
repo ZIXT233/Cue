@@ -26,6 +26,7 @@ export interface HarnessSession {
   source?: "hook" | "title";
   probe?: "hooks-and-title" | "hooks" | "title-only" | "unconfirmed";
   setup?: boolean;
+  tmux?: boolean;
 }
 export interface HarnessProbe {
   readonly sessionId?: string;

@@ -90,6 +90,17 @@ pub async fn ssh_login_exec(host: &str, command: &str) -> AppResult<Vec<u8>> {
     Ok(output[start + marker.len()..].to_vec())
 }
 
+/// Wrap a command with tmux session allowing the session to persist across disconnects/app restarts.
+pub fn wrap_remote_tmux(terminal_id: &str, cwd: &str, command: &str) -> String {
+    let session_name = format!("que_{}", terminal_id.replace('-', "_"));
+    format!(
+        "exec tmux -u new-session -A -D -s {} -c {} /bin/sh -c {} \\; set-option status off",
+        shell_quote(&session_name),
+        shell_quote(cwd),
+        shell_quote(command)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -203,7 +203,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       // Must stay 1.0: any extra leading shows background seams between rows of
       // block-glyph TUI art (Claude Code logo) in the Windows DOM renderer.
       lineHeight: 1,
-      scrollback: 8000,
+      scrollback: 100000,
       // xterm 6.0.0 + screenReaderMode re-sends the trailing character when an
       // IME commits in the middle of a line (xtermjs/xterm.js#5456 / PR #5698).
       // Re-enable after upgrading past that CompositionHelper fix.
@@ -561,9 +561,22 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
     startRef.current = (async () => {
       fitAndResize();
       if (restored || reconnectKey > 0) {
-        // Restoring a tab must never silently launch a replacement shell.
-        const info = await terminalRequest(`/api/terminal/${encodeURIComponent(id)}`);
-        sessionReadOnly ||= info.readOnly === true;
+        // Restoring a tab must never silently launch a replacement shell for local processes,
+        // but remote sessions (sshHost) with tmux should re-attach to their existing remote session.
+        try {
+          const info = await terminalRequest(`/api/terminal/${encodeURIComponent(id)}`);
+          sessionReadOnly ||= info.readOnly === true;
+        } catch (error) {
+          if (sshHost) {
+            await terminalRequest("/api/terminal", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id, cwd, cols: terminal.cols, rows: terminal.rows, sshHost, ...(cardId ? { cardId } : {}) }),
+            });
+          } else {
+            throw error;
+          }
+        }
       } else {
         await terminalRequest("/api/terminal", {
           method: "POST",

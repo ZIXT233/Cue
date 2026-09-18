@@ -69,6 +69,7 @@ export const enLocale: LocalePlugin = {
     "error.dismiss": "Close",
     "harness.choose": "Choose a CLI or terminal",
     "harness.chooseHint": "Use a CLI installed on the workspace host, or open a shell.",
+    "harness.tmuxKeepAlive": "Use tmux session keep-alive (persist across disconnects / app close)",
     "harness.checking": "Checking and starting…",
     "harness.shellDescription": "Move to the work area manually; notify on command completion. Does not use Harness notification probes.",
     "harness.background": "Move to work area and wait",

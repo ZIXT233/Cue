@@ -170,11 +170,12 @@ impl Host {
         let mut env = HashMap::new();
         if self.remote {
             env.insert("QUE_HARNESS_CHANNEL".into(), self.token.clone());
+            if let Some(signal_dir) = self.harness.remote_signal_dir(self) {
+                env.insert("QUE_HARNESS_SIGNAL_DIR".into(), signal_dir);
+            }
+        } else {
+            env.insert("QUE_HARNESS_SIGNAL_DIR".into(), directory.to_string_lossy().into_owned());
         }
-        // A remote Cursor reports into this token's cards folder; every other harness
-        // owns the signal dir the launcher created for it.
-        let signal_dir = if self.remote { self.harness.remote_signal_dir(self) } else { None };
-        env.insert("QUE_HARNESS_SIGNAL_DIR".into(), signal_dir.unwrap_or_else(|| directory.to_string_lossy().into_owned()));
         env.insert("QUE_HARNESS_KIND".into(), self.kind.clone());
         // Fire the hook's internal watchdog before the runner's kill deadline.
         env.insert("QUE_HARNESS_WATCHDOG_MS".into(), ((self.timeout - 2).max(1) * 1000).to_string());

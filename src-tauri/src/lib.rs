@@ -72,17 +72,24 @@ fn reveal_log(path: String) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    #[allow(unused_mut)]
+    let mut builder = tauri::Builder::default();
+
+    #[cfg(not(debug_assertions))]
+    {
         // Must be the first plugin registered: a second launch hands its argv to the
         // running instance and exits, instead of spawning a rival process that would
         // race on ~/.que/queue.json, settings.json and the terminal registry.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.unminimize();
                 let _ = window.set_focus();
             }
-        }))
+        }));
+    }
+
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -109,7 +116,14 @@ pub fn run() {
             // launches on the old one — silently, since the provider's config keeps
             // pointing at the same path. Align them here: at most one small write each.
             let aligned = crate::harness::sync_installed_hooks(&state.bin_dir, &crate::paths::plugins_dir());
-            crate::harness::deploy_external_hooks(&state.bin_dir, &crate::paths::plugins_dir());
+            #[cfg(debug_assertions)]
+            let should_deploy_external = std::env::var("QUE_DEPLOY_EXTERNAL_HOOKS").is_ok();
+            #[cfg(not(debug_assertions))]
+            let should_deploy_external = std::env::var("QUE_SKIP_EXTERNAL_HOOKS").is_err();
+
+            if should_deploy_external {
+                crate::harness::deploy_external_hooks(&state.bin_dir, &crate::paths::plugins_dir());
+            }
             if !aligned.is_empty() {
                 crate::debuglog::info("hooks", &format!("plugin hooks realigned: {}", aligned.join(", ")));
             }
@@ -129,9 +143,34 @@ pub fn run() {
             notify::check_notification_permission,
             focus::focus_external_window,
         ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    #[cfg(target_os = "macos")]
+                    {
+                        let _ = window.hide();
+                    }
+                    #[cfg(not(target_os = "macos"))]
+                    {
+                        let _ = window.minimize();
+                    }
+                    api.prevent_close();
+                }
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while building Que")
         .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { has_visible_windows, .. } = event {
+                if !has_visible_windows {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.unminimize();
+                        let _ = window.set_focus();
+                    }
+                }
+            }
             if matches!(event, tauri::RunEvent::Exit) {
                 if let Some(hub) = app.try_state::<crate::terminal::TerminalHub>() {
                     hub.shutdown();

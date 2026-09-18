@@ -338,6 +338,7 @@ export function CardQueueShell() {
       host: cardHostLabel(card, workspace),
       folder: projectOf(card.cwd),
       remote: workspace?.kind === "ssh",
+      tmux: Boolean(workspace?.kind === "ssh" && (card.harness ? card.harness.tmux !== false : true)),
       location,
     };
   });
@@ -860,6 +861,7 @@ export function CardQueueShell() {
     const workspaceLabel = workspace?.name || displayProject(visibleCard);
     const remoteHost = remoteHostOf(workspace);
     const remoteAddress = remoteHost ? `${remoteHost.user ? `${remoteHost.user}@` : ""}${remoteHost.hostname}${remoteHost.port && remoteHost.port !== 22 ? `:${remoteHost.port}` : ""}` : hostLabel;
+    const isTmux = Boolean(workspace?.kind === "ssh" && (visibleCard.harness ? visibleCard.harness.tmux !== false : true));
     const showScore = !!(visibleCard.session || visibleCard.harness) && queue?.sortMode === "score" && visibleCard.phase === "attention";
     const showHeaderMeta = showScore || visibleCard.phase !== "attention" || hasUrgentCall(visibleCard) || visibleCard.remindAt !== undefined || !(visibleCard.session || visibleCard.harness);
     const harness = (
@@ -884,7 +886,7 @@ export function CardQueueShell() {
                   <span className="cq-score-term"><span className="cq-score-operator">+</span><ScoreChipTooltip text={t("queue.等待分钟", { minutes: waitMinutes })}><span className="cq-score-chip cq-score-wait"><span aria-hidden="true">⏳</span> {t("queue.Wait")} <b>{cardScore.waiting}</b></span></ScoreChipTooltip></span>
                   {cardScore.tags.map(tag => <span className="cq-score-term" key={tag.name}><span className="cq-score-operator">+</span><ScoreChipTooltip text={tag.description}><span className="cq-score-chip" style={tagColor(tag.name)}>{tag.name} <b>{tag.weight}</b></span></ScoreChipTooltip></span>)}
                 </span>
-              </div>}<div className="cq-meta-harness" /></div>}<div className="cq-card-title-row"><div className="cq-title-primary"><h2>{titleOf(visibleCard)}</h2>{workspace?.kind === "ssh" ? <ScoreChipTooltip text={<div className="cq-environment-tooltip"><span><WorkspaceMachineIcon name="remote" size={14} />{hostLabel}</span><small>{remoteAddress}</small></div>}><span className="cq-title-environment cq-title-host" aria-label={hostWithHarness}><WorkspaceMachineIcon name="remote" size={15} /><b title={hostWithHarness}>{hostWithHarness}</b></span></ScoreChipTooltip> : <span className="cq-title-environment cq-title-host" aria-label={hostWithHarness}><WorkspaceMachineIcon name="local" size={15} /><b title={hostWithHarness}>{hostWithHarness}</b></span>}<ScoreChipTooltip text={<div className="cq-environment-tooltip"><span><WorkspaceMachineIcon name="folder" size={14} />{workspaceLabel}</span><small>{workspace?.cwd || visibleCard.cwd}</small></div>}><span className="cq-title-environment cq-title-workspace" aria-label={workspaceLabel}><WorkspaceMachineIcon name="folder" size={15} /><b>{workspaceLabel}</b></span></ScoreChipTooltip></div><div className="cq-title-controls"><div className="cq-title-harness" /><div className="cq-title-branches" /><div className="cq-title-actions"><div className="cq-title-tools">{layout ? <SideTerminalButton pressed={layout.terminalOpen} label={t("queue.sideTerminal")} onClick={layout.toggleTerminal} /> : sideButton}</div><div className="cq-title-logs" /></div></div></div></div>
+              </div>}<div className="cq-meta-harness" /></div>}<div className="cq-card-title-row"><div className="cq-title-primary"><h2>{titleOf(visibleCard)}</h2>{workspace?.kind === "ssh" ? <ScoreChipTooltip text={<div className="cq-environment-tooltip"><span><WorkspaceMachineIcon name="remote" size={14} />{hostLabel}{isTmux && <span className="cq-tmux-badge">TMUX</span>}</span><small>{remoteAddress}</small></div>}><span className="cq-title-environment cq-title-host" aria-label={hostWithHarness}><WorkspaceMachineIcon name="remote" size={15} />{isTmux && <span className="cq-tmux-badge">TMUX</span>}<b title={hostWithHarness}>{hostWithHarness}</b></span></ScoreChipTooltip> : <span className="cq-title-environment cq-title-host" aria-label={hostWithHarness}><WorkspaceMachineIcon name="local" size={15} /><b title={hostWithHarness}>{hostWithHarness}</b></span>}<ScoreChipTooltip text={<div className="cq-environment-tooltip"><span><WorkspaceMachineIcon name="folder" size={14} />{workspaceLabel}</span><small>{workspace?.cwd || visibleCard.cwd}</small></div>}><span className="cq-title-environment cq-title-workspace" aria-label={workspaceLabel}><WorkspaceMachineIcon name="folder" size={15} /><b>{workspaceLabel}</b></span></ScoreChipTooltip></div><div className="cq-title-controls"><div className="cq-title-harness" /><div className="cq-title-branches" /><div className="cq-title-actions"><div className="cq-title-tools">{layout ? <SideTerminalButton pressed={layout.terminalOpen} label={t("queue.sideTerminal")} onClick={layout.toggleTerminal} /> : sideButton}</div><div className="cq-title-logs" /></div></div></div></div>
                 <div className="cq-card-actions">
                   {!detachedId && (visibleCard.remindAt !== undefined
                     ? <button className="cq-action-defer" onClick={async () => { if (busy) return; if (await remindBack(visibleCard)) finishCard(visibleCard.id); }} disabled={busy} aria-label={t("queue.放回队列")}><Icon name="undo" /><span className="cq-action-tooltip" role="tooltip">{t("queue.放回队列")}</span></button>
@@ -1086,6 +1088,7 @@ export function CardQueueShell() {
               host: cardHostLabel(card, workspace),
               workspace: displayProject(card),
               remote: workspace?.kind === "ssh",
+              tmux: Boolean(workspace?.kind === "ssh" && (card.harness ? card.harness.tmux !== false : true)),
             };
           })}
           activeIndex={inspecting ? -1 : deckIndex}

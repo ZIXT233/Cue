@@ -28,6 +28,7 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
   const [mode] = useState<"cli">("cli");
   const [busy, setBusy] = useState(false);
   const [startingKind, setStartingKind] = useState<string | null>(null);
+  const [useTmux, setUseTmux] = useState(true);
   const [actionError, setActionError] = useState<unknown>(null);
   const auth = useSshAuthChallenge();
   const [pendingAction, setPendingAction] = useState<{ action: string; data: Record<string, unknown> } | null>(null);
@@ -146,7 +147,7 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
   </button>;
   const terminal = harness ? <TerminalPanel key={`${harness.terminalId}:${connection}`} cardId={card.id} embedded remote={harness.remote} {...terminalOptions(harness.kind)} readOnly={card.archivedAt !== undefined || harness.state === "exited" || harness.state === "error"} tab={{ id: harness.terminalId, cwd: card.cwd, restored: true }} active={active} inQueue={inQueue}
     harnessKind={harness.kind} harnessName={harnessName(harness.kind)} isStarting={harness.state === "starting" || connection > 0}
-    onOutput={harness.kind === "shell" && harness.shellCommandNotifications !== false ? data => shellProbe.current?.(data) : undefined} onStatusChange={setTerminalStatus} onRestart={() => void act(harness.providerSessionId ? "harness_resume" : "harness_reopen")} onClosed={() => {}} onCloseError={() => {}} /> : null;
+    onOutput={harness.kind === "shell" && harness.shellCommandNotifications !== false ? data => shellProbe.current?.(data) : undefined} onStatusChange={setTerminalStatus} onRestart={() => void act(harness.providerSessionId ? "harness_resume" : "harness_reopen", { tmux: harness.tmux ?? (Boolean(sshHost) && useTmux) })} onClosed={() => {}} onCloseError={() => {}} /> : null;
 
   return <>
     {actionError ? <ErrorDialog message={harnessErrorText(actionError, t)} onDismiss={() => setActionError(null)} /> : null}
@@ -168,7 +169,7 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
           {actionError ? <p role="alert">{harnessErrorText(actionError, t)}</p> : null}
           <div className="cq-terminal-recovery-actions">
             <button type="button" className="cq-terminal-recovery-primary" disabled={busy} onClick={() => {
-              if (ended) void act(harness.providerSessionId ? "harness_resume" : "harness_reopen");
+              if (ended) void act(harness.providerSessionId ? "harness_resume" : "harness_reopen", { tmux: harness.tmux ?? (Boolean(sshHost) && useTmux) });
               else { setTerminalStatus("connecting"); setConnection(key => key + 1); }
             }}>{busy ? t("harness.opening") : ended ? harness.providerSessionId ? t("harness.resume") : t("harness.startProcess") : t("harness.reconnect")}</button>
             {ended && onStartAll && <button type="button" className="cq-terminal-recovery-all" disabled={busy} onClick={() => void (async () => {
@@ -195,10 +196,23 @@ export function HarnessCard({ card, active, inQueue = false, sshHost, sshHostNam
     </div> : mode === "cli" ? <div className="cq-harness-empty"><div className="cq-harness-picker">
       <h3>{t("harness.choose")}</h3>
       <p>{t("harness.chooseHint")}</p>
+      {Boolean(sshHost) && (
+        <div style={{ margin: "8px 0 12px", display: "flex", alignItems: "center" }}>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: "8px", fontSize: "12.5px", cursor: "pointer", opacity: 0.9, userSelect: "none" }}>
+            <input
+              type="checkbox"
+              checked={useTmux}
+              onChange={e => setUseTmux(e.target.checked)}
+              style={{ cursor: "pointer" }}
+            />
+            <span>{t("harness.tmuxKeepAlive") || "启用 tmux 会话保活（远程断线/重启不中断）"}</span>
+          </label>
+        </div>
+      )}
       <div className="cq-harness-options">
       {harnessPicker.map(item => <button key={item.id} type="button" className="cq-harness-option" disabled={busy} onClick={() => {
         setStartingKind(item.id);
-        void act("harness_start", { kind: item.id }).finally(() => setStartingKind(null));
+        void act("harness_start", { kind: item.id, tmux: Boolean(sshHost) && useTmux }).finally(() => setStartingKind(null));
       }}>
         <span className="cq-harness-option-icon" aria-hidden="true">{item.id === "shell" ? <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3m6 0h4"/></svg> : isPiMark(item.id) ? <span className="cq-harness-pi-mark">π</span> : <ProviderIcon id={providerIconId(item.id)} size={28} />}</span>
         <span><strong>{item.name}</strong><small>{busy ? t("harness.checking") : item.id === "shell" ? t("harness.shellDescription") : item.description}</small></span><span className="cq-harness-option-arrow" aria-hidden="true">↗</span>

@@ -261,9 +261,13 @@ function useCardSideTerminal({
     if (userToggled.current) return;
     setOpen(!!savedOpen);
   }, [savedOpen]);
+  const initialEnsured = useRef(false);
   useEffect(() => {
-    if (open) extras.ensureTab();
-  }, [open, extras.ensureTab]);
+    if (!initialEnsured.current) {
+      initialEnsured.current = true;
+      if (open && extras.tabs.length === 0) extras.ensureTab();
+    }
+  }, [open, extras]);
   const widthRef = useRef(DEFAULT_WIDTH);
   const maxWidth = useCallback(() => {
     if (typeof window === "undefined") return MAX_WIDTH;

@@ -162,12 +162,14 @@ impl HarnessRuntime {
 
     pub async fn launch(
         &self,
+        card_id: &str,
         kind: &str,
         workspace: &QueueWorkspace,
         resume: Option<HarnessSession>,
         terminals: &TerminalHub,
         settings: &SettingsStore,
         bin_dir: &std::path::Path,
+        use_tmux: bool,
     ) -> AppResult<HarnessSession> {
         let harness = find(kind).ok_or_else(|| AppError::machine("HARNESS_UNSUPPORTED"))?;
         let terminal_id = Uuid::new_v4().simple().to_string();
@@ -200,8 +202,18 @@ impl HarnessRuntime {
             }
         }
 
+        if workspace.kind == "ssh" && use_tmux {
+            let host = workspace.ssh_host.as_deref().ok_or_else(|| AppError::machine("WORKSPACE_MISSING"))?;
+            let found = String::from_utf8_lossy(&ssh_login_exec(host, &crate::ssh::ssh_cli_probe("tmux")).await?)
+                .trim()
+                .to_string();
+            if !found.starts_with('/') {
+                return Err(AppError::machine_detail("HARNESS_CLI_MISSING_REMOTE", "tmux"));
+            }
+        }
+
         if shell_card {
-            let shell = prepare_shell(workspace, &signals, bin_dir, settings.read()?.powershell_enabled).await?;
+            let shell = prepare_shell(workspace, card_id, &signals, bin_dir, settings.read()?.powershell_enabled, use_tmux).await?;
             spawn = shell.spawn;
             version = shell.version;
             shell_notifications = shell.command_notifications;
@@ -316,13 +328,24 @@ impl HarnessRuntime {
                 let exports = env.iter().map(|(k, v)| format!("{k}={}", crate::ssh::shell_quote(v))).collect::<Vec<_>>().join(" ");
                 let command = std::iter::once(adapter.executable.to_string()).chain(launch_args).map(|s| crate::ssh::shell_quote(&s)).collect::<Vec<_>>().join(" ");
                 let unset = tweaks.ssh_unset.iter().map(|name| format!("unset {name} && ")).collect::<String>();
-                let remote = format!(
-                    "cd {} && {}{}QUE_HARNESS_TTY=$(tty) && export QUE_HARNESS_TTY && exec {}",
-                    crate::ssh::shell_quote(&workspace.cwd),
-                    unset,
-                    if exports.is_empty() { String::new() } else { format!("export {exports} && ") },
-                    command
-                );
+                let remote = if use_tmux {
+                    let inner_exec = format!(
+                        "{}QUE_HARNESS_TTY=$(tty) && export QUE_HARNESS_TTY && exec {}",
+                        if exports.is_empty() { String::new() } else { format!("export {exports} && ") },
+                        command
+                    );
+                    let term_id = format!("card_{card_id}");
+                    let wrapped = crate::ssh::wrap_remote_tmux(&term_id, &workspace.cwd, &inner_exec);
+                    format!("cd {} && {}{}", crate::ssh::shell_quote(&workspace.cwd), unset, wrapped)
+                } else {
+                    format!(
+                        "cd {} && {}{}QUE_HARNESS_TTY=$(tty) && export QUE_HARNESS_TTY && exec {}",
+                        crate::ssh::shell_quote(&workspace.cwd),
+                        unset,
+                        if exports.is_empty() { String::new() } else { format!("export {exports} && ") },
+                        command
+                    )
+                };
                 spawn = Spawn::Remote { host: host.to_string(), command: ssh_login_command(&remote) };
             } else if cfg!(windows) {
                 let launch = windows_command(&command_path, &launch_args);
@@ -577,6 +600,7 @@ impl HarnessRuntime {
             remote: Some(workspace.kind == "ssh"),
             source: None,
             probe: None,
+            tmux: if workspace.kind == "ssh" { Some(use_tmux) } else { None },
         })
     }
 }
@@ -788,6 +812,7 @@ mod tests {
             remote: None,
             source: None,
             probe: None,
+            tmux: None,
         }
     }
 

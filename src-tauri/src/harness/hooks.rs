@@ -26,7 +26,10 @@ pub async fn prepare_hook_launch(
     let ingress = std::fs::read_to_string(bin_dir.join("harness-hook.cjs"))?;
     let harness = registry::find(kind).ok_or_else(|| crate::error::AppError::msg("不支持的 CLI agent"))?;
     let host = Host::open(kind, workspace, token, &ingress).await?;
-    let plan = harness.plan(Ctx { kind, workspace, host: &host, bin_dir }).await?;
+    let mut plan = harness.plan(Ctx { kind, workspace, host: &host, bin_dir }).await?;
+    if !plan.files.contains_key("hook.cjs") {
+        plan.files.insert("hook.cjs".into(), ingress);
+    }
     host.install(&plan).await?;
     let args = plan.args;
     let mut env = plan.env;

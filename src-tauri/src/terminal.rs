@@ -13,7 +13,18 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
-const MAX_BACKLOG: usize = 128 * 1024;
+/// Default backlog kept per session in memory and stored to transcript.
+/// Can be customized via QUE_TERMINAL_BACKLOG_BYTES (set to 0 for unlimited).
+const DEFAULT_MAX_BACKLOG: usize = 20 * 1024 * 1024; // 20 MB
+
+fn max_backlog() -> usize {
+    if let Ok(val) = std::env::var("QUE_TERMINAL_BACKLOG_BYTES") {
+        if let Ok(bytes) = val.parse::<usize>() {
+            return bytes;
+        }
+    }
+    DEFAULT_MAX_BACKLOG
+}
 
 #[derive(Clone, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -499,9 +510,21 @@ impl TerminalHub {
     /// `cwd` is a path on `host`, not here — it is what the shell `cd`s into, and
     /// the record's `cwd` only has to stay stable across re-attaches of the same
     /// terminal id.
-    pub fn create_remote_shell(&self, cwd: String, cols: u16, rows: u16, id: Option<String>, host: String) -> AppResult<String> {
-        let command = crate::ssh::remote_login_shell(&cwd, crate::terminal_theme::app_dark());
-        self.create(cwd, cols, rows, id, Spawn::Remote { host, command }, false, None)
+    pub fn create_remote_shell(&self, cwd: String, cols: u16, rows: u16, id: Option<String>, host: String, use_tmux: bool, card_id: Option<String>) -> AppResult<String> {
+        let term_id = id.unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
+        let inner = crate::ssh::remote_login_shell(&cwd, crate::terminal_theme::app_dark());
+        let command = if use_tmux {
+            let session_id = if let Some(cid) = card_id.filter(|s| !s.is_empty()) {
+                format!("card_{}_side_{}", cid.replace('-', "_"), term_id.replace('-', "_"))
+            } else {
+                term_id.clone()
+            };
+            let wrapped = crate::ssh::wrap_remote_tmux(&session_id, &cwd, &inner);
+            crate::ssh::ssh_login_command(&wrapped)
+        } else {
+            inner
+        };
+        self.create(cwd, cols, rows, Some(term_id), Spawn::Remote { host, command }, false, None)
     }
 
     pub fn snapshot(&self, id: &str) -> Option<TerminalSnapshot> {
@@ -924,10 +947,11 @@ fn persist_dirty(inner: &Mutex<HashMap<String, Record>>) {
 }
 
 fn trim_backlog(backlog: &mut String) {
-    if backlog.len() <= MAX_BACKLOG {
+    let limit = max_backlog();
+    if limit == 0 || backlog.len() <= limit {
         return;
     }
-    let mut extra = backlog.len() - MAX_BACKLOG;
+    let mut extra = backlog.len() - limit;
     while extra < backlog.len() && !backlog.is_char_boundary(extra) {
         extra += 1;
     }
@@ -1079,5 +1103,27 @@ mod tests {
         assert!(matches!(seen[1], PtyCommand::Resize(120, 40)));
         assert!(matches!(seen[2], PtyCommand::Data(ref data) if data == "\u{4f60}\u{597d}".as_bytes()));
         assert!(matches!(seen[3], PtyCommand::Close));
+    }
+
+    #[test]
+    fn trim_backlog_respects_capacity_and_utf8_boundaries() {
+        let mut text = "a".repeat(100);
+        trim_backlog(&mut text);
+        assert_eq!(text.len(), 100);
+
+        // Test with QUE_TERMINAL_BACKLOG_BYTES override
+        std::env::set_var("QUE_TERMINAL_BACKLOG_BYTES", "10");
+        let mut sample = format!("hello world {}", "你好世界");
+        trim_backlog(&mut sample);
+        assert!(sample.len() <= 10);
+        assert!(std::str::from_utf8(sample.as_bytes()).is_ok());
+
+        // Test with 0 = unlimited
+        std::env::set_var("QUE_TERMINAL_BACKLOG_BYTES", "0");
+        let mut huge = "x".repeat(1000);
+        trim_backlog(&mut huge);
+        assert_eq!(huge.len(), 1000);
+
+        std::env::remove_var("QUE_TERMINAL_BACKLOG_BYTES");
     }
 }

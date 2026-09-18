@@ -103,6 +103,8 @@ pub struct HarnessSession {
     pub source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub probe: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tmux: Option<bool>,
 }
 
 /// One message of an external session's own record, so a card can show the exchange

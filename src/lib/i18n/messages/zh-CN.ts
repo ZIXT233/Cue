@@ -69,6 +69,7 @@ export const zhCNLocale: LocalePlugin = {
     "error.dismiss": "关闭",
     "harness.choose": "选择 CLI 或终端",
     "harness.chooseHint": "使用工作区主机上已安装的 CLI，或打开 Shell 操作主机",
+    "harness.tmuxKeepAlive": "使用 tmux 会话保活（远程断线或关闭应用时不中断）",
     "harness.checking": "检查并启动…",
     "harness.shellDescription": "手动放入工作区，命令完成通知；不接入 Harness 通知探针",
     "harness.background": "放入工作区等待",

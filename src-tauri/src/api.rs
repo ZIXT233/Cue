@@ -222,7 +222,12 @@ async fn launch_harness(state: &AppState, body: &Value, action: &str) -> AppResu
                 || session.provider_session_id.as_deref().is_some_and(|id| session_exists(&session.kind, id) != Some(false))
         })
     };
-    let launched = match state.harness.launch(kind, &captured.1, resume.clone(), &state.terminals, &state.settings, &state.bin_dir).await {
+    let use_tmux = body.get("tmux")
+        .and_then(|v| v.as_bool())
+        .or_else(|| captured.0.harness.as_ref().and_then(|h| h.tmux))
+        .or_else(|| resume.as_ref().and_then(|r| r.tmux))
+        .unwrap_or(captured.1.kind == "ssh");
+    let launched = match state.harness.launch(id, kind, &captured.1, resume.clone(), &state.terminals, &state.settings, &state.bin_dir, use_tmux).await {
         Ok(session) => session,
         Err(error) => {
             crate::debuglog::log_error(&format!("harness launch card={id} kind={kind} action={action}"), &error);
@@ -496,6 +501,9 @@ fn apply_action(queue: &mut CardQueue, body: &Value, action: &str, state: &AppSt
         "side_terminal_remove" => {
             let terminal_id = body.get("terminalId").and_then(|v| v.as_str()).unwrap_or_default();
             if !valid_side_terminal_id(terminal_id) { return Err(AppError::msg("无效的终端")); }
+            let ssh_host = queue.cards.iter().find(|c| Some(c.id.as_str()) == id)
+                .and_then(|c| queue.workspaces.as_ref().and_then(|ws| ws.iter().find(|w| Some(&w.id) == c.workspace_id.as_ref())))
+                .and_then(|w| if w.kind == "ssh" { w.ssh_host.clone() } else { None });
             if let Some(card) = queue.cards.iter_mut().find(|c| Some(c.id.as_str()) == id) {
                 if let Some(tabs) = card.side_terminals.as_mut() {
                     tabs.retain(|tab| tab.id != terminal_id);
@@ -508,6 +516,16 @@ fn apply_action(queue: &mut CardQueue, body: &Value, action: &str, state: &AppSt
             crate::debuglog::info_card("queue", id.unwrap_or(""), Some(terminal_id), "side_terminal_remove");
             crate::debuglog::unbind_term(terminal_id);
             state.terminals.kill(terminal_id);
+            if let Some(host) = ssh_host {
+                let tid = terminal_id.to_string();
+                let cid = id.unwrap_or("").to_string();
+                tokio::spawn(async move {
+                    let s1 = format!("que_card_{}_side_{}", cid.replace('-', "_"), tid.replace('-', "_"));
+                    let s2 = format!("que_{}", tid.replace('-', "_"));
+                    let cmd = format!("tmux kill-session -t {} 2>/dev/null || tmux kill-session -t {} 2>/dev/null || true", crate::ssh::shell_quote(&s1), crate::ssh::shell_quote(&s2));
+                    let _ = crate::ssh::ssh_exec(&host, &cmd).await;
+                });
+            }
         }
         "side_terminal_open" => {
             let card = queue.cards.iter_mut().find(|c| Some(c.id.as_str()) == id).ok_or_else(|| AppError::machine("CARD_GONE"))?;
@@ -921,7 +939,19 @@ fn create_terminal_inner(state: &AppState, body: &Value) -> AppResult<String> {
     let id = body.get("id").and_then(|v| v.as_str()).map(str::to_string);
     let created = match terminal_target(cwd, terminal_ssh_host(body)?)? {
         TerminalTarget::Local(cwd) => state.terminals.create_shell(cwd.to_string_lossy().into_owned(), cols, rows, id),
-        TerminalTarget::Remote { host, directory } => state.terminals.create_remote_shell(directory, cols, rows, id, host),
+        TerminalTarget::Remote { host, directory } => {
+            let card_id = body.get("cardId").and_then(|v| v.as_str()).map(str::to_string);
+            let use_tmux = if let Some(card_id) = card_id.as_deref() {
+                state.queue.read_snapshot().ok().and_then(|q| {
+                    q.cards.iter().find(|c| c.id == card_id).and_then(|c| {
+                        c.harness.as_ref().and_then(|h| h.tmux)
+                    })
+                }).unwrap_or(true)
+            } else {
+                true
+            };
+            state.terminals.create_remote_shell(directory, cols, rows, id, host, use_tmux, card_id)
+        }
     };
     if let Ok(term) = &created {
         if let Some(card) = body.get("cardId").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {

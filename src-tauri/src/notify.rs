@@ -16,7 +16,7 @@ mod native {
     use std::sync::{Arc, OnceLock};
 
     use serde_json::json;
-    use tauri::{AppHandle, Emitter};
+    use tauri::{AppHandle, Emitter, Manager};
     use user_notify::{
         get_notification_manager, NotificationBuilder, NotificationManager,
         NotificationResponseAction,
@@ -41,6 +41,11 @@ mod native {
                     "cardId": response.user_info.get("cardId"),
                     "sessionUrl": session_url,
                 });
+                if let Some(window) = emitter.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
                 let _ = emitter.emit(super::RESPONSE_EVENT, payload);
             }),
             Vec::new(),

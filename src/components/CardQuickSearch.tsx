@@ -10,6 +10,7 @@ export type CardQuickSearchItem = {
   host: string;
   folder: string;
   remote: boolean;
+  tmux?: boolean;
   location: "working" | "queue" | "detached";
 };
 
@@ -103,7 +104,7 @@ export function CardQuickSearch({ items, onOpen }: {
       >
         <strong>{item.title}</strong>
         <span className="cq-card-search-meta">
-          <span><WorkspaceMachineIcon name={item.remote ? "remote" : "local"} size={14} />{item.host}</span>
+          <span><WorkspaceMachineIcon name={item.remote ? "remote" : "local"} size={14} />{item.tmux && <span className="cq-tmux-badge">TMUX</span>}{item.host}</span>
           <span><WorkspaceMachineIcon name="folder" size={14} />{item.folder}</span>
         </span>
       </button>) : <div className="cq-card-search-empty">{t("queue.没有匹配的卡片")}</div>}

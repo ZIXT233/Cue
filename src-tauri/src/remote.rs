@@ -920,7 +920,7 @@ mod tests {
             // but never exits, so the client can exercise resize and keystrokes.
             // A login shell is the same kind of session, and is what a remote
             // side terminal runs.
-            if command.contains("keep-open") || command.trim_end().ends_with("-il") {
+            if command.contains("keep-open") || command.contains("-il") {
                 return Ok(());
             }
             session.exit_status_request(channel, if command.contains("fail") { 3 } else { 0 })?;
@@ -1099,15 +1099,14 @@ mod tests {
 
         let hub = crate::terminal::TerminalHub::new(crate::live::LiveBus::new());
         let side = "cccccccccccccccccccccccccccccccc";
-        hub.create_remote_shell("/srv/app".into(), 132, 43, Some(side.into()), target.id.clone()).expect("start a remote side terminal");
+        hub.create_remote_shell("/srv/app".into(), 132, 43, Some(side.into()), target.id.clone(), true, Some("card1".into())).expect("start a remote side terminal");
         {
             let recorded = recorded.clone();
             wait_for(move || recorded.lock().commands.iter().any(|command| command.contains("/srv/app")), "the remote login shell").await;
         }
-        // The command is the user's login shell in the workspace directory, and
-        // the size the pane asked for is the size the remote pty got — this is
-        // the whole reason for not going through a local ConPTY.
-        assert!(recorded.lock().commands.iter().any(|command| command == &crate::ssh::remote_login_shell("/srv/app", crate::terminal_theme::app_dark())));
+        let raw_cmd = crate::ssh::remote_login_shell("/srv/app", crate::terminal_theme::app_dark());
+        let expected = crate::ssh::ssh_login_command(&crate::ssh::wrap_remote_tmux("card_card1_side_cccccccccccccccccccccccccccccccc", "/srv/app", &raw_cmd));
+        assert!(recorded.lock().commands.iter().any(|command| command == &expected));
         assert_eq!(recorded.lock().pty, Some(("xterm-256color".into(), 132, 43)));
 
         assert!(hub.write(side, "echo hi\n"), "keystrokes reach the channel");

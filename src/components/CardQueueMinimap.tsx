@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { WorkspaceMachineIcon } from "./WorkspaceMachineIcon";
 
 type CardQueueMinimapProps = {
-  cards: Array<{ id: string; sessionId?: string; title: string; excerpt?: string; host: string; workspace: string; remote: boolean }>;
+  cards: Array<{ id: string; sessionId?: string; title: string; excerpt?: string; host: string; workspace: string; remote: boolean; tmux?: boolean }>;
   activeIndex: number;
   label: string;
   itemLabel: (index: number, title: string) => string;
@@ -147,7 +147,7 @@ export function CardQueueMinimap({ cards, activeIndex, label, itemLabel, onSelec
           ? <p>{(previewCard.sessionId ? summaries[previewCard.sessionId] : undefined) || previewCard.excerpt}</p>
           : null}
         <div className="cq-queue-minimap-environment">
-          <span><WorkspaceMachineIcon name={previewCard.remote ? "remote" : "local"} size={14} />{previewCard.host}</span>
+          <span><WorkspaceMachineIcon name={previewCard.remote ? "remote" : "local"} size={14} />{previewCard.tmux && <span className="cq-tmux-badge">TMUX</span>}{previewCard.host}</span>
           <span><WorkspaceMachineIcon name="folder" size={14} />{previewCard.workspace}</span>
         </div>
       </aside>}

@@ -2,9 +2,16 @@ use std::path::{Path, PathBuf};
 
 pub fn data_dir() -> PathBuf {
     if let Ok(path) = std::env::var("QUE_DATA_DIR") {
-        return PathBuf::from(path);
+        return expand_user(&path);
     }
-    dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".que")
+    #[cfg(debug_assertions)]
+    {
+        dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".que-dev")
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".que")
+    }
 }
 
 pub fn queue_file() -> PathBuf {

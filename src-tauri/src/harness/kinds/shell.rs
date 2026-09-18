@@ -21,7 +21,7 @@ fn forward(p: &Path) -> String {
     p.to_string_lossy().replace('\\', "/")
 }
 
-pub async fn prepare_shell(workspace: &QueueWorkspace, directory: &Path, bin_dir: &Path, powershell: bool) -> AppResult<ShellLaunch> {
+pub async fn prepare_shell(workspace: &QueueWorkspace, card_id: &str, directory: &Path, bin_dir: &Path, powershell: bool, use_tmux: bool) -> AppResult<ShellLaunch> {
     let remote = workspace.kind == "ssh";
     let mut shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into());
     let mut root = directory.to_path_buf();
@@ -77,12 +77,23 @@ pub async fn prepare_shell(workspace: &QueueWorkspace, directory: &Path, bin_dir
         }
         let exports = env.iter().map(|(k, v)| format!("{k}={}", shell_quote(v))).collect::<Vec<_>>().join(" ");
         let command = std::iter::once(shell.clone()).chain(args).map(|s| shell_quote(&s)).collect::<Vec<_>>().join(" ");
-        let remote_cmd = format!(
-            "cd {} && {}exec {}",
-            shell_quote(&workspace.cwd),
-            if exports.is_empty() { String::new() } else { format!("export {exports} && ") },
-            command
-        );
+        let term_id = format!("card_{card_id}");
+        let remote_cmd = if use_tmux {
+            let inner_exec = format!(
+                "{}exec {}",
+                if exports.is_empty() { String::new() } else { format!("export {exports} && ") },
+                command
+            );
+            let wrapped = crate::ssh::wrap_remote_tmux(&term_id, &workspace.cwd, &inner_exec);
+            crate::ssh::ssh_login_command(&format!("cd {} && {}", shell_quote(&workspace.cwd), wrapped))
+        } else {
+            format!(
+                "cd {} && {}exec {}",
+                shell_quote(&workspace.cwd),
+                if exports.is_empty() { String::new() } else { format!("export {exports} && ") },
+                command
+            )
+        };
         // The remote side's sshd allocates the pty for this command; there is no
         // local ssh process and therefore no local pty to go with it.
         return Ok(ShellLaunch { spawn: Spawn::Remote { host: host.to_string(), command: remote_cmd }, version: String::new(), command_notifications });
