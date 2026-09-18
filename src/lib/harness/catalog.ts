@@ -29,14 +29,14 @@ export interface HarnessCatalogEntry {
 export const harnessCatalog: HarnessCatalogEntry[] = [
   { id: "codex", name: "Codex", description: "OpenAI · CLI", vendor: "OpenAI", iconId: "openai", forms: { cli: "supported", desktop: "unsupported", vscode: "supported" }, conptyCursorHide: false },
   { id: "claude", name: "Claude Code", description: "Anthropic · CLI", vendor: "Anthropic", iconId: "anthropic", forms: { cli: "supported", desktop: "unsupported", vscode: "supported" } },
-  { id: "codebuddy", name: "CodeBuddy", description: "Tencent · CLI", vendor: "Tencent", iconId: "anthropic", forms: { cli: "supported", desktop: "unsupported", vscode: "unsupported" } },
   { id: "cursor", name: "Cursor Agent", description: "Cursor · CLI", vendor: "Cursor", iconId: "cursor", forms: { cli: "supported", desktop: "supported", vscode: "unsupported" } },
+  { id: "opencode", name: "OpenCode", description: "OpenCode · CLI", vendor: "OpenCode", iconId: "opencode", forms: { cli: "supported", desktop: "supported", vscode: "supported" } },
+  { id: "antigravity", name: "Antigravity CLI", description: "Google · CLI", vendor: "Google", iconId: "google", forms: { cli: "supported", desktop: "supported", vscode: "supported" } },
   { id: "pi", name: "Pi", description: "Pi · CLI", vendor: "Pi", iconId: "pi", forms: { cli: "supported", desktop: "unsupported", vscode: "unsupported" } },
   { id: "omp", name: "Oh My Pi", description: "OMP · CLI", vendor: "Pi", iconId: "pi", forms: { cli: "supported", desktop: "unsupported", vscode: "unsupported" } },
+  { id: "codebuddy", name: "CodeBuddy", description: "Tencent · CLI", vendor: "Tencent", iconId: "codebuddy", forms: { cli: "supported", desktop: "unsupported", vscode: "unsupported" } },
   { id: "grok", name: "Grok Build", description: "xAI · CLI", vendor: "xAI", iconId: "grok", forms: { cli: "supported", desktop: "unsupported", vscode: "unsupported" }, themeProfile: "grok" },
-  { id: "antigravity", name: "Antigravity CLI", description: "Google · CLI", vendor: "Google", iconId: "google", forms: { cli: "supported", desktop: "supported", vscode: "supported" } },
-  { id: "opencode", name: "OpenCode", description: "OpenCode · CLI", vendor: "OpenCode", iconId: "opencode", forms: { cli: "supported", desktop: "supported", vscode: "supported" } },
-  { id: "shell", name: "Shell", description: "手动放入工作区，命令完成通知；不接入 Harness 通知探针", focusReporting: false },
+  { id: "shell", name: "Shell", description: "纯终端，不响应 Agent 事件", focusReporting: false },
 ];
 
 const harnessMeta = (id: HarnessId | string) => harnessCatalog.find(item => item.id === id);
@@ -50,7 +50,7 @@ export const harnessName = (id: HarnessId | string) => harnessMeta(id)?.name ?? 
  * and shares its settings key, so the two share one card — as on the backend, where
  * `omp` resolves to Pi's `ingress_key`.
  */
-const EXTERNAL_ORDER: HarnessId[] = ["codex", "cursor", "antigravity", "grok", "claude", "opencode", "codebuddy", "pi"];
+const EXTERNAL_ORDER: HarnessId[] = ["codex", "claude", "cursor", "opencode", "antigravity", "pi", "codebuddy", "grok"];
 export interface ExternalHarnessEntry {
   id: HarnessId;
   name: string;

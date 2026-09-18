@@ -25,6 +25,8 @@ function FormCapsule({
 
 export function ExternalSessionsSettings() {
   const { t } = useI18n();
+  const [master, setMaster] = useState(false);
+  const [masterLoading, setMasterLoading] = useState(false);
   const [ingress, setIngress] = useState<Record<string, boolean>>({});
   const [loadingHarness, setLoadingHarness] = useState<string | null>(null);
 
@@ -32,13 +34,38 @@ export function ExternalSessionsSettings() {
     void fetch("/api/tools/settings")
       .then(async (res) => {
         if (!res.ok) return;
-        const data = (await res.json()) as { externalIngress?: Record<string, boolean> };
+        const data = (await res.json()) as { externalIngress?: Record<string, boolean>; externalNoticesEnabled?: boolean };
         if (data.externalIngress) {
           setIngress(data.externalIngress);
+        }
+        if (typeof data.externalNoticesEnabled === "boolean") {
+          setMaster(data.externalNoticesEnabled);
         }
       })
       .catch(() => {});
   }, []);
+
+  const handleMasterToggle = async (nextChecked: boolean) => {
+    setMasterLoading(true);
+    setMaster(nextChecked);
+    try {
+      const res = await fetch("/api/tools/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ externalNotices: nextChecked }),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { externalNoticesEnabled?: boolean };
+        if (typeof data.externalNoticesEnabled === "boolean") {
+          setMaster(data.externalNoticesEnabled);
+        }
+      }
+    } catch {
+      setMaster((prev) => !nextChecked);
+    } finally {
+      setMasterLoading(false);
+    }
+  };
 
   const handleToggle = async (harnessId: string, nextChecked: boolean) => {
     setLoadingHarness(harnessId);
@@ -77,9 +104,28 @@ export function ExternalSessionsSettings() {
         {t("settings.externalSessionsDescription")}
       </p>
 
-      <div className="external-sessions-list">
+      <div className="external-harness-card is-master">
+        <div className="external-harness-card-header">
+          <div className="external-harness-brand">
+            <div className="external-harness-info">
+              <span className="external-harness-name">{t("settings.externalNoticesMaster")}</span>
+              <span className="external-harness-vendor">{t("settings.externalNoticesMasterDescription")}</span>
+            </div>
+          </div>
+          <div className="external-harness-toggle">
+            <ConfigSwitch
+              checked={master}
+              loading={masterLoading}
+              label={t("settings.externalNoticesMasterLabel")}
+              onChange={(checked) => void handleMasterToggle(checked)}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className={`external-sessions-list${master ? "" : " is-gated"}`}>
         {externalHarnesses.map((harness) => {
-          const isEnabled = ingress[harness.id] !== false;
+          const isEnabled = master && ingress[harness.id] !== false;
           const isLoading = loadingHarness === harness.id;
 
           return (
@@ -106,6 +152,7 @@ export function ExternalSessionsSettings() {
                   <ConfigSwitch
                     checked={isEnabled}
                     loading={isLoading}
+                    disabled={!master}
                     label={`${t("settings.externalSessions")} - ${harness.name}`}
                     onChange={(checked) => void handleToggle(harness.id, checked)}
                   />

@@ -41,6 +41,7 @@ const PROVIDER_ICONS: Record<string, { symbol: string; color: boolean }> = {
   together: { symbol: "together", color: true },
   grok: { symbol: "grok", color: false },
   cursor: { symbol: "cursor", color: false },
+  codebuddy: { symbol: "codebuddy", color: true },
 };
 
 export function ProviderIcon({ id, size }: { id: string; size: number }) {

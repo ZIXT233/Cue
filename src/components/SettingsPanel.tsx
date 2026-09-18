@@ -300,8 +300,8 @@ export function SettingsPanel({ initialSection, onClose }: Props) {
   const [mountedSections, setMountedSections] = useState<ReadonlySet<SettingsSection>>(() => new Set([section]));
   const sections: { id: SettingsSection; label: string }[] = [
     { id: "general", label: t("settings.general") },
-    { id: "external-sessions", label: t("settings.externalSessions") },
     { id: "remote-hosts", label: t("machines.settings") },
+    { id: "external-sessions", label: t("settings.externalSessions") },
   ];
 
   useEffect(() => setLastSettingsSection(section), [section]);

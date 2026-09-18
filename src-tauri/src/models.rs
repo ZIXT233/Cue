@@ -303,12 +303,20 @@ pub struct AppSettings {
     pub powershell_enabled: bool,
     #[serde(default = "default_developer_probes", alias = "developerProbes")]
     pub developer_probes: bool,
+    /// Master gate for external-session notices. Off by default: the feature
+    /// (and especially its jump-to-window action) is experimental and not
+    /// reliable yet. Per-harness keys only apply while this is on.
+    #[serde(default, alias = "externalNoticesEnabled")]
+    pub external_notices_enabled: bool,
     #[serde(default = "default_external_ingress", alias = "externalIngress")]
     pub external_ingress: std::collections::HashMap<String, bool>,
 }
 
 impl AppSettings {
     pub fn is_external_ingress_enabled(&self, harness: &str) -> bool {
+        if !self.external_notices_enabled {
+            return false;
+        }
         // Family members share their host's key: "gemini" toggles with "antigravity",
         // "omp" with "pi". The registry is the one place that mapping lives.
         let key = crate::harness::registry::find(harness)
@@ -323,6 +331,7 @@ impl Default for AppSettings {
         Self {
             powershell_enabled: default_powershell(),
             developer_probes: default_developer_probes(),
+            external_notices_enabled: false,
             external_ingress: default_external_ingress(),
         }
     }
@@ -373,13 +382,25 @@ mod tests {
         assert!(on.developer_probes);
         let camel: AppSettings = serde_json::from_str(r#"{"developerProbes":true}"#).unwrap();
         assert!(camel.developer_probes);
-        assert!(missing.is_external_ingress_enabled("codex"));
-        assert!(missing.is_external_ingress_enabled("cursor"));
-        assert!(missing.is_external_ingress_enabled("antigravity"));
-        assert!(missing.is_external_ingress_enabled("gemini"));
+        // Master gate off by default: a settings file without the key (and one
+        // with only per-harness keys) gates every harness off.
+        assert!(!missing.is_external_ingress_enabled("codex"));
+        assert!(!missing.is_external_ingress_enabled("cursor"));
+        assert!(!missing.is_external_ingress_enabled("antigravity"));
+        assert!(!missing.is_external_ingress_enabled("gemini"));
 
         let disabled: AppSettings = serde_json::from_str(r#"{"external_ingress":{"codex":false}}"#).unwrap();
         assert!(!disabled.is_external_ingress_enabled("codex"));
-        assert!(disabled.is_external_ingress_enabled("cursor"));
+        assert!(!disabled.is_external_ingress_enabled("cursor"));
+
+        // With the gate on, per-harness keys apply: absent means enabled.
+        let on: AppSettings = serde_json::from_str(r#"{"external_notices_enabled":true,"external_ingress":{"codex":false}}"#).unwrap();
+        assert!(!on.is_external_ingress_enabled("codex"));
+        assert!(on.is_external_ingress_enabled("cursor"));
+        // The gate overrides even an explicit per-harness true.
+        let gated: AppSettings = serde_json::from_str(r#"{"external_notices_enabled":false,"external_ingress":{"codex":true}}"#).unwrap();
+        assert!(!gated.is_external_ingress_enabled("codex"));
+        let camel: AppSettings = serde_json::from_str(r#"{"externalNoticesEnabled":true}"#).unwrap();
+        assert!(camel.is_external_ingress_enabled("codex"));
     }
 }

@@ -218,6 +218,9 @@ export function ExternalSessionCard({ notice, isFront, host, folder, directory, 
           <p className="cq-external-notice-secondary">
             {t("external.footerAutoDismiss", { name: harness })}
           </p>
+          <p className="cq-external-notice-experimental">
+            {t("external.footerExperimental")}
+          </p>
         </div>
         <button
           type="button"

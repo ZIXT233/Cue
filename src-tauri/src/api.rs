@@ -721,6 +721,7 @@ fn tools_json(settings: &crate::models::AppSettings) -> Value {
         "logPath": crate::debuglog::log_path().to_string_lossy(),
         "logDir": crate::paths::logs_dir().to_string_lossy(),
         "externalIngress": settings.external_ingress,
+        "externalNoticesEnabled": settings.external_notices_enabled,
     })
 }
 
@@ -729,6 +730,10 @@ async fn get_tools(State(state): State<AppState>) -> AppResult<impl IntoResponse
 }
 
 async fn put_tools(State(state): State<AppState>, Json(body): Json<Value>) -> AppResult<impl IntoResponse> {
+    if let Some(enabled) = body.get("externalNotices").and_then(|v| v.as_bool()) {
+        let settings = state.settings.set_external_notices(enabled).await?;
+        return Ok(Json(tools_json(&settings)));
+    }
     if let Some(harness) = body.get("externalHarness").and_then(|v| v.as_str()) {
         let enabled = body.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
         let settings = state.settings.set_external_ingress(harness, enabled).await?;
