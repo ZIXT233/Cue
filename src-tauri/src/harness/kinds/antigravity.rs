@@ -140,6 +140,19 @@ impl Harness for Antigravity {
         }
     }
 
+    /// Remove the bundle `global` inserted under Que's key; the shared
+    /// `~/.gemini/config/hooks.json` and every other key in it stay.
+    fn unglobal(&self, ctx: &GlobalCtx) {
+        let path = ctx.home.join(".gemini/config/hooks.json");
+        let Ok(existing) = std::fs::read_to_string(&path) else { return };
+        let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&existing) else { return };
+        if let Some(obj) = value.as_object_mut() {
+            if obj.remove("que-session-state").is_some() {
+                let _ = atomic_write(&path, &serde_json::to_string_pretty(&value).unwrap_or_default());
+            }
+        }
+    }
+
     /// Antigravity has no permission event at all, so a tool start is a guess: the hook
     /// runs *before* the gate, and only silence past the window tells the two apart.
     fn guesses_attention(&self, signal: &HookSignal) -> bool {

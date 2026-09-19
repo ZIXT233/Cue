@@ -70,12 +70,18 @@ export function WorkspacePicker({ workspaces, remoteHosts, onSelect, onUpdate, o
     }
   }, [clearConnectionChallenge, onSelect, presentConnectionChallenge]);
   const selectWorkspace = useCallback((workspace: QueueWorkspace) => {
+    if (busy || connectingWorkspace || editingWorkspace || removingWorkspace) return;
     if (workspace.kind !== "ssh") { onSelect(workspace.id); return; }
     const host = remoteHosts.find(item => item.id === workspace.sshHost) ?? { id: workspace.sshHost || "", name: workspace.sshHost || "SSH", hostname: workspace.sshHost || "", source: "config" as const };
     void connectAndSelect(workspace, host);
-  }, [connectAndSelect, onSelect, remoteHosts]);
+  }, [busy, connectingWorkspace, editingWorkspace, removingWorkspace, connectAndSelect, onSelect, remoteHosts]);
   return <><div className="cq-overlay" onClick={onClose}><section inert={!!removingWorkspace || !!editingWorkspace || !!connectingWorkspace} className="cq-workspace-picker" role="dialog" aria-modal="true" aria-label={t("queue.选择工作区，新建会话")} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => {
-    if (event.key === "Escape") { if (removingWorkspace) setRemovingWorkspace(null); else if (editingWorkspace) setEditingWorkspace(null); else onClose(); }
+    // React portal events can bubble here even though the DOM subtree is
+    // inert. Only handle our own keyboard navigation while the picker is free.
+    if (event.defaultPrevented || event.nativeEvent.isComposing || busy || connectingWorkspace || editingWorkspace || removingWorkspace || !event.currentTarget.contains(event.target as Node)) return;
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); return; }
+    // A focused button already activates its own workspace/action on Enter.
+    if ((event.target as HTMLElement).closest("button")) return;
     if (event.key === "ArrowDown") { event.preventDefault(); setHovered(null); setSelected(visibleMatches.length ? index < 0 ? 0 : (index + 1) % visibleMatches.length : -1); }
     if (event.key === "ArrowUp") { event.preventDefault(); setHovered(null); setSelected(visibleMatches.length ? index < 0 ? visibleMatches.length - 1 : (index + visibleMatches.length - 1) % visibleMatches.length : -1); }
     if (event.key === "Enter" && visibleMatches[index < 0 ? 0 : index] && !busy) { event.preventDefault(); selectWorkspace(visibleMatches[index < 0 ? 0 : index]); }

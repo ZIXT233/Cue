@@ -1,7 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { documentCanvasDark, harnessTerminalTheme, resolveTerminalThemeProfile, terminalThemeHostFromDocument, type TerminalThemeProfile } from "@/lib/terminal-theme";
+import { documentCanvasDark, harnessTerminalTheme, resolveTerminalThemeProfile, terminalThemeHostFromDocument, windowsPtyOptions, type TerminalThemeProfile } from "@/lib/terminal-theme";
+import { readTerminalAppearance, terminalFontFamily, terminalFontSize, TERMINAL_APPEARANCE_EVENT, TERMINAL_APPEARANCE_KEY, type TerminalAppearance } from "@/lib/terminal-appearance";
+import { CodexComposerColors, codexComposerTheme } from "@/lib/codex-composer-colors";
+import { TerminalReplyPolicy, isTerminalProtocolReply } from "@/lib/terminal-replies";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { enhancedTerminalKey, decodeTerminalClipboard } from "@/lib/terminal-enhancements";
@@ -45,54 +48,6 @@ interface Props {
 function liveThemeProfile(themeProfile: TerminalThemeProfile | undefined, remote: boolean | undefined): TerminalThemeProfile | undefined {
   if (typeof document === "undefined") return themeProfile === "grok" ? "grok" : undefined;
   return resolveTerminalThemeProfile(themeProfile, terminalThemeHostFromDocument(remote, document.documentElement, navigator));
-}
-
-/// Terminal capability replies xterm generates for a probe the CLI sent.
-///
-/// These are answers, not keystrokes: they only exist because the CLI asked, and
-/// the CLI is expected to consume them off its own input. The ones seen in the
-/// wild do not — Cursor probes DA1 at startup and then echoes the `[?1;2c` it
-/// gets back onto its prompt as literal text. Withholding the reply is the
-/// correct fallback: the CLI drops through to `TERM` / `COLORFGBG`, which Que
-/// already sets at spawn.
-///
-/// Deliberately exact-match rather than a prefix test. `ESC[A`..`ESC[D`, `ESC[H`,
-/// `ESC[F` and every other arrow/function key also start with `ESC[` and must
-/// keep flowing to the PTY.
-///
-/// The DECSET 2031 theme reports are *not* listed: those are pushed at the CLI by
-/// `apply_canvas_dark` when the app theme flips, not answers to a probe, so they
-/// still have to reach the PTY.
-const CAPABILITY_REPLIES = [
-  "\x1b[?1;2c",           // DA1 — the reply Cursor fails to consume
-  "\x1b[?6c",             // DA1 — linux console variant
-  "\x1b[>0;276;0c",       // DA2 — VT100, xterm build 276
-  "\x1b[>85;95;0c",       // DA2 — VT220-class
-  "\x1b[>83;40003;0c",    // DA2 — VT320-class
-  "\x1b[0n",              // DSR — device status OK
-  // Focus reporting is Que's, not xterm's. The same two sequences mean different
-  // things: xterm emits them for browser textarea focus, while Que means "this
-  // card is / is not in the queue" (see sendFocusReport). Two sources writing
-  // opposite meanings into one stream is worse than either alone, and the queue
-  // reading is the one the CLI actually acts on. `sendFocusReport` is therefore
-  // the only writer; these two constants silence xterm's half.
-  //
-  // No keystroke produces these bytes — xterm parses `CSI I` as CHT but never
-  // emits it, and Tab (`\x09`) / Shift+Tab (`\x1b[Z`) have their own encodings.
-  "\x1b[I",
-  "\x1b[O",
-];
-
-function isCapabilityReply(data: string): boolean {
-  return CAPABILITY_REPLIES.includes(data);
-}
-
-/// CPR (`ESC[<row>;<col>R`) is the one reply that carries live values, so it
-/// cannot be a constant. Matched narrowly: only the position-report form.
-const CPR_REPLY = /^\x1b\[\??\d+;\d+R$/;
-
-function isCapabilityReplyOrReport(data: string): boolean {
-  return isCapabilityReply(data) || CPR_REPLY.test(data);
 }
 
 export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, onUnavailable, embedded = false, readOnly = false, onStatusChange, onOutput, themeProfile, remote = false, focusReporting = false, inQueue = false, conptyCursorHide = true, cardId, harnessKind, harnessName, isStarting }: Props) {
@@ -185,48 +140,70 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
     }
 
     const conptyHost = !remote && typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
+    const replyPolicy = new TerminalReplyPolicy(conptyHost && document.documentElement.dataset.conptyFallback !== "true");
     let conptyCursorHidden = false;
     let conptyRevealTimer: ReturnType<typeof setTimeout> | undefined;
-    const liveTheme = () => harnessTerminalTheme(documentCanvasDark(document.documentElement), liveThemeProfile(themeProfile, remote));
+    let appearance = readTerminalAppearance();
+    const composerColors = harnessKind === "codex" && appearance.codexAdaptiveBackground ? new CodexComposerColors() : undefined;
+    const liveTheme = () => {
+      const dark = documentCanvasDark(document.documentElement);
+      const profile = liveThemeProfile(themeProfile, remote);
+      const theme = harnessTerminalTheme(dark, profile, appearance[dark ? "dark" : "light"]);
+      return composerColors ? codexComposerTheme(theme, profile === "campbell" || profile === "grok" || dark) : theme;
+    };
+    const liveFont = () => terminalFontFamily(appearance.font, getComputedStyle(container).getPropertyValue("--font-mono").trim() || "monospace");
     // Follow the settings font slider 1:1 (chat baseline 14px ↔ terminal 13px),
     // so one control scales both surfaces.
     const liveFontSize = () => {
       const chat = Number.parseFloat(getComputedStyle(container).getPropertyValue("--chat-content-font-size"));
-      const offset = Number.isFinite(chat) ? chat - 14 : 0;
-      return Math.max(9, Math.min(22, Math.round(13 + offset)));
+      return terminalFontSize(chat);
     };
     const terminal = new Terminal({
       cursorBlink: !conptyHost,
       allowProposedApi: true,
-      fontFamily: getComputedStyle(container).getPropertyValue("--font-mono").trim() || "monospace",
+      fontFamily: liveFont(),
       fontSize: liveFontSize(),
-      // Must stay 1.0: any extra leading shows background seams between rows of
-      // block-glyph TUI art (Claude Code logo) in the Windows DOM renderer.
+      // Keep the DOM fallback compact too; WebGL draws continuous block glyphs.
       lineHeight: 1,
+      letterSpacing: 0,
+      customGlyphs: true,
       scrollback: 100000,
       // xterm 6.0.0 + screenReaderMode re-sends the trailing character when an
       // IME commits in the middle of a line (xtermjs/xterm.js#5456 / PR #5698).
       // Re-enable after upgrading past that CompositionHelper fix.
       screenReaderMode: false,
       disableStdin: true,
-      windowsPty: conptyHost ? { backend: "conpty", buildNumber: 26200 } : undefined,
+      windowsPty: windowsPtyOptions(conptyHost, document.documentElement),
       theme: liveTheme(),
     });
-    const themeObserver = new MutationObserver(() => {
+    const refreshAppearance = () => {
       terminal.options.theme = liveTheme();
+      container.closest<HTMLElement>(".terminal-panel")?.style.setProperty("--terminal-bg", liveTheme().background!);
       const size = liveFontSize();
-      if (size !== terminal.options.fontSize) {
+      const font = liveFont();
+      if (size !== terminal.options.fontSize || font !== terminal.options.fontFamily) {
         terminal.options.fontSize = size;
+        terminal.options.fontFamily = font;
         fit.fit();
+        void document.fonts.load(`${size}px ${font}`).then(() => { if (!disposed) { fit.fit(); terminal.refresh(0, terminal.rows - 1); } });
       }
-    });
+    };
+    const appearanceChanged = (event: Event) => {
+      if (event instanceof StorageEvent && event.key !== TERMINAL_APPEARANCE_KEY && event.key !== null) return;
+      appearance = event instanceof CustomEvent ? event.detail as TerminalAppearance : readTerminalAppearance();
+      refreshAppearance();
+    };
+    window.addEventListener(TERMINAL_APPEARANCE_EVENT, appearanceChanged);
+    window.addEventListener("storage", appearanceChanged);
+    const themeObserver = new MutationObserver(refreshAppearance);
     themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme", "data-desktop-platform", "data-terminal-bg", "style"] });
     terminalRef.current = terminal;
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(container);
+    refreshAppearance();
     const hideConptyCursor = () => {
-      if (!conptyHost || !conptyCursorHideRef.current) return;
+      if (!conptyHost || gpu || !conptyCursorHideRef.current) return;
       // Reveal only after output goes quiet. A short window strobes the cursor
       // while streaming TUIs (Codex spinner) emit chunks faster than the timer.
       clearTimeout(conptyRevealTimer);
@@ -260,33 +237,28 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       if (text !== null) void copyText(text).catch(() => { if (!disposed) setClipboardPending(text); });
       return true;
     });
-    // ConPTY cannot consume color-query replies on its input side: the bytes are
-    // handed to the CLI as key events, and its input box renders them as literal
-    // text — the `› ]10;rgb:…\]11;rgb:…\` garbage. xterm answers `OSC 10;?` /
-    // `11;?` / `12;?` / `4;n;?` probes with the theme's colors, so swallow the
-    // query at the parser: no reply is ever generated, and the CLI falls through
-    // to TERM / COLORFGBG, which the spawn env already sets. Same policy as the
-    // DA1 filter on sendInput. The handler payload excludes the `10;` prefix —
-    // a bare query arrives as `?` (or `n;?` for OSC 4) — so the test is just for
-    // `?`. Set requests (no `?`) still reach xterm so apps that repaint their
-    // canvas keep working. This also silences backlogs: a replayed `10;?`
-    // re-triggers the report path the same way a live one does.
-    const swallowColorQueries = conptyHost || !harnessKind || harnessKind === "shell";
+    // Modern ConPTY transports OSC replies. Answer live application queries,
+    // including CLIs launched inside a shell; never answer historical output.
+    // The inbox fallback retains its fixed palette and conservative policy.
+    const swallowColorQueries = conptyHost && liveThemeProfile(themeProfile, remote) === "campbell";
     appLog("debug", "osc", `panel-mount swallow=${swallowColorQueries} harnessKind=${harnessKind ?? "none"} conpty=${conptyHost}`, { card: cardId, term: id });
-    if (swallowColorQueries) {
-      const isColorQuery = (data: string) => data.includes("?");
-      for (const ident of [4, 10, 11, 12]) terminal.parser.registerOscHandler(ident, isColorQuery);
+    for (const ident of [4, 10, 11, 12]) {
+      terminal.parser.registerOscHandler(ident, data => data.includes("?") && (replaying || swallowColorQueries));
     }
-    // WebGL draws the caret into the canvas, so ConPTY cursor hiding needs DOM.
+    // WebGL custom glyphs fill block cells exactly; DOM font glyphs leave
+    // vertical seams on Windows. Fall back to DOM if GPU setup/context fails.
     let gpu: import("@xterm/addon-webgl").WebglAddon | undefined;
     let gpuLoss: { dispose(): void } | undefined;
-    if (!conptyHost) {
+    {
       void import("@xterm/addon-webgl").then(({ WebglAddon }) => {
         if (disposed) return;
         const addon = new WebglAddon();
         try {
           terminal.loadAddon(addon);
           gpu = addon;
+          clearTimeout(conptyRevealTimer);
+          conptyCursorHidden = false;
+          container.classList.remove("is-conpty-redraw");
           gpuLoss = addon.onContextLoss(() => {
             gpuLoss?.dispose(); gpuLoss = undefined;
             gpu?.dispose(); gpu = undefined;
@@ -314,12 +286,11 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
     };
     const sendInput = (data: string) => {
       if (exited || inputFailed || sessionReadOnly) return;
-      // xterm answers terminal probes on this same channel, but the CLIs that
-      // probe (Cursor asks for DA1 on every launch) do not consume the answer —
-      // they echo it onto their prompt as literal text. Drop it instead: without
-      // a reply they fall back to TERM / COLORFGBG, which the spawn env carries.
-      if (isCapabilityReplyOrReport(data)) return;
+      // Replies share the input channel. Filter replay and the already-answered
+      // native startup handshake, not normal live application probes.
+      if (replyPolicy.suppress(data, replaying, focusReportingRef.current)) return;
       if (!connected || terminal.options.disableStdin) return;
+      if (isTerminalProtocolReply(data)) { writer.reply(data); return; }
       if (!conptyHost) { writer.write(data); return; }
       // One HTTP POST per animation frame instead of one per keystroke.
       pendingInput += data;
@@ -483,9 +454,12 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       }
       outputQueue = outputQueue.then(() => new Promise<void>((resolve) => {
         if (disposed) { resolve(); return; }
-        replaying = event.reset === true;
-        if (event.reset) terminal.reset();
-        terminal.write(event.data, resolve);
+        // Both reset=true (full backlog) and reset=false (incremental catch-up)
+        // are historical. Live backend output omits reset entirely.
+        replaying = event.reset !== undefined;
+        if (event.reset) { terminal.reset(); composerColors?.reset(); }
+        replyPolicy.observeOutput(event.data);
+        terminal.write(composerColors?.feed(event.data) ?? event.data, () => { replaying = false; resolve(); });
       }));
       callbacksRef.current.onOutput?.(event.data);
       offset = event.offset;
@@ -652,6 +626,8 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       void writer.stop();
       resizeObserver.disconnect();
       themeObserver.disconnect();
+      window.removeEventListener(TERMINAL_APPEARANCE_EVENT, appearanceChanged);
+      window.removeEventListener("storage", appearanceChanged);
       container.removeEventListener("paste", paste, true);
       container.removeEventListener("dragover", dragOver);
       container.removeEventListener("dragleave", dragLeave);
@@ -671,7 +647,7 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError, 
       terminal.dispose();
       terminalRef.current = null;
     };
-  }, [id, cwd, sshHost, restored, reconnectKey, readOnly, themeProfile, remote]);
+  }, [id, cwd, sshHost, restored, reconnectKey, readOnly, themeProfile, remote, harnessKind]);
 
   useEffect(() => { liveControlRef.current?.(active); }, [active]);
 

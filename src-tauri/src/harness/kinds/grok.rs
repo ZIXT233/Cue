@@ -113,6 +113,11 @@ impl Harness for Grok {
         let _ = atomic_write(&dir.join("que-session-state.json"), &serde_json::json!({ "queManaged": true, "hooks": hooks }).to_string());
     }
 
+    /// The bundle file is wholly Que-owned (`queManaged`), so removal is deletion.
+    fn unglobal(&self, ctx: &GlobalCtx) {
+        let _ = std::fs::remove_file(ctx.home.join(".grok/hooks/que-session-state.json"));
+    }
+
     fn remote_root(&self, home: &str, _token: &str, _ingress_sha: &str) -> String {
         format!("{home}/.cache/que/harness-plugins/grok")
     }

@@ -170,6 +170,14 @@ pub struct LaunchTweaks {
     pub ssh_unset: &'static [&'static str],
 }
 
+/// The hook deadline the CLI is told about, in seconds. On Windows every hook
+/// pays a PowerShell + node process startup (seconds, cold start with Defender
+/// even more), so short deadlines turn into "hook timed out" on real sessions —
+/// the same reason Cursor runs 15s.
+pub fn default_hook_timeout(windows_local: bool) -> u32 {
+    if windows_local { 15 } else { 2 }
+}
+
 /// Everything Que knows about one harness, in one place.
 pub trait Harness: Sync {
     /// The canonical kind string: what cards carry and what `find` looks up.
@@ -209,6 +217,12 @@ pub trait Harness: Sync {
     }
     /// The user-level install serving sessions Que never launched. Default: none.
     fn global(&self, _ctx: &GlobalCtx) {}
+    /// Undo `global` — the settings toggle's other half, so switching a kind off
+    /// leaves no Que entries behind in the CLI's own config. Only the entries
+    /// `global` wrote are removed; user-written hooks stay. Kinds whose config
+    /// shape makes a clean removal awkward may leave this a no-op and document
+    /// the leftovers.
+    fn unglobal(&self, _ctx: &GlobalCtx) {}
 
     /// Where the plugin root lands on a remote host.
     fn remote_root(&self, home: &str, token: &str, _ingress_sha: &str) -> String {
@@ -216,7 +230,7 @@ pub trait Harness: Sync {
     }
     /// The hook deadline the CLI is told about, in seconds.
     fn hook_timeout(&self, windows_local: bool) -> u32 {
-        if windows_local { 5 } else { 2 }
+        default_hook_timeout(windows_local)
     }
     /// How a hook of this kind is invoked on the machine it is installed on.
     fn hook_command(&self, host: &Host, event: Option<&str>) -> String {

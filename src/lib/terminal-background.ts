@@ -35,12 +35,12 @@ export function applyTerminalBackgroundAttr(background: TerminalBackground): voi
   document.documentElement.dataset.terminalBg = background;
 }
 
-export function syncTerminalCanvasToBackend(dark: boolean): void {
+export function syncTerminalCanvasToBackend(dark: boolean, refresh = false): void {
   if (typeof window === "undefined") return;
   void fetch("/api/terminal-theme", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ dark }),
+    body: JSON.stringify({ dark, refresh }),
     keepalive: true,
   }).catch(() => {});
 }

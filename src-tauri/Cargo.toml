@@ -47,6 +47,7 @@ user-notify = "0.4.2"
 russh = { version = "0.63.3", default-features = false, features = ["ring", "flate2", "rsa"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
 windows-sys = { version = "0.59", features = ["Win32_System_LibraryLoader"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

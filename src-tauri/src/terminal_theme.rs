@@ -26,26 +26,52 @@ pub fn is_dark_colorfgbg(value: &str) -> bool {
         .is_some_and(|bg| bg < 8)
 }
 
-/// CSI ? 2031 h/l: the CLI wants (or stops wanting) theme-change reports.
-pub fn observe_theme_notify(data: &str, current: bool) -> bool {
-    let bytes = data.as_bytes();
-    let mut enabled = current;
-    let mut i = 0;
-    while i + 3 < bytes.len() {
-        if bytes[i] == 0x1b && bytes[i + 1] == b'[' && bytes[i + 2] == b'?' {
-            let rest = &data[i + 3..];
-            if let Some(end) = rest.find(|c: char| c == 'h' || c == 'l') {
-                let on = rest.as_bytes()[end] == b'h';
-                if rest[..end].split(';').any(|mode| mode == "2031") {
-                    enabled = on;
+/// Incremental DECSET/DECRST 2031 observer. PTY reads can split any escape
+/// sequence; control strings (titles, clipboard, DCS) must not arm reports.
+#[derive(Default)]
+pub struct ThemeNotifyParser {
+    state: u8, // 0 text, 1 ESC, 2 CSI, 3 control string, 4 string ESC
+    csi: Vec<u8>,
+    string_is_osc: bool,
+}
+
+impl ThemeNotifyParser {
+    pub fn feed(&mut self, bytes: &[u8]) -> Option<bool> {
+        let mut change = None;
+        for &byte in bytes {
+            match self.state {
+                3 | 4 => {
+                    self.state = if (byte == 7 && self.string_is_osc) || byte == 24 || byte == 26 || (self.state == 4 && byte == b'\\') { 0 }
+                        else if byte == 27 { 4 } else { 3 };
                 }
-                i += 3 + end + 1;
-                continue;
+                1 => {
+                    self.state = match byte {
+                        b'[' => { self.csi.clear(); 2 },
+                        b']' | b'P' | b'X' | b'^' | b'_' => { self.string_is_osc = byte == b']'; 3 },
+                        27 => 1,
+                        _ => 0,
+                    };
+                }
+                2 => {
+                    if (0x40..=0x7e).contains(&byte) {
+                        if (byte == b'h' || byte == b'l') && self.csi.first() == Some(&b'?')
+                            && self.csi[1..].split(|b| *b == b';').any(|mode| mode == b"2031") {
+                            change = Some(byte == b'h');
+                        }
+                        self.state = 0;
+                        self.csi.clear();
+                    } else if byte == 27 || byte == 24 || byte == 26 || self.csi.len() >= 128 {
+                        self.state = if byte == 27 { 1 } else { 0 };
+                        self.csi.clear();
+                    } else {
+                        self.csi.push(byte);
+                    }
+                }
+                _ => { if byte == 27 { self.state = 1; } }
             }
         }
-        i += 1;
+        change
     }
-    enabled
 }
 
 /// Mode 2031: 1 = became dark, 2 = became light. Prompts a new OSC 10/11 probe.
@@ -66,10 +92,32 @@ mod tests {
 
     #[test]
     fn theme_notify_tracks_decset_2031() {
-        assert!(observe_theme_notify("\x1b[?2031h", false));
-        assert!(observe_theme_notify("\x1b[?1004;2031h", false));
-        assert!(!observe_theme_notify("\x1b[?2031l", true));
+        let mut parser = ThemeNotifyParser::default();
+        assert_eq!(parser.feed(b"\x1b[?2031h"), Some(true));
+        assert_eq!(parser.feed(b"\x1b[?1004;2031h"), Some(true));
+        assert_eq!(parser.feed(b"\x1b[?2031l"), Some(false));
         assert_eq!(theme_change_report(true), "\x1b[?997;1n");
         assert_eq!(theme_change_report(false), "\x1b[?997;2n");
+    }
+
+    #[test]
+    fn theme_notify_survives_every_read_boundary() {
+        for sequence in [b"\x1b[?1004;2031h".as_slice(), b"\x1b[?2031l".as_slice()] {
+            for split in 0..=sequence.len() {
+                let mut parser = ThemeNotifyParser::default();
+                let first = parser.feed(&sequence[..split]);
+                let last = parser.feed(&sequence[split..]);
+                assert_eq!(last.or(first), Some(sequence.last() == Some(&b'h')));
+            }
+        }
+    }
+
+    #[test]
+    fn theme_notify_ignores_strings_and_other_modes() {
+        let mut parser = ThemeNotifyParser::default();
+        for byte in b"\x1b]0;title \x1b[?2031h\x1b\\\x1bP\x07\x1b[?2031h\x1b\\\x1b[?12031h" {
+            assert_eq!(parser.feed(&[*byte]), None);
+        }
+        assert_eq!(parser.feed(b"\x1b[?2031h\x1b[?2031l"), Some(false));
     }
 }

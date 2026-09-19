@@ -20,7 +20,7 @@ pub use debug::HarnessDebugSnapshot;
 pub use session_label::session_exists;
 pub use env::local_environment;
 pub use external::ExternalRuntime;
-pub use hooks::{deploy_external_hooks, prepare_hook_launch, sync_installed_hooks};
+pub use hooks::{prepare_hook_launch, sync_external_hooks, sync_installed_hooks};
 pub use osc::HookOscProbe;
 pub use signals::{observe_hook, observe_title, settle_held, HookSignal, ProbeState};
 pub use windows::windows_command;
@@ -171,8 +171,12 @@ impl HarnessRuntime {
         bin_dir: &std::path::Path,
         use_tmux: bool,
     ) -> AppResult<HarnessSession> {
+        let launch_started = std::time::Instant::now();
         let harness = find(kind).ok_or_else(|| AppError::machine("HARNESS_UNSUPPORTED"))?;
         let terminal_id = Uuid::new_v4().simple().to_string();
+        let mark = |stage: &str| crate::debuglog::info_term("harness", &terminal_id,
+            &format!("startup stage={stage} elapsed_ms={} kind={kind}", launch_started.elapsed().as_millis()));
+        mark("begin");
         let signals = signal_dir(&terminal_id);
         if resume.as_ref().is_some_and(|s| s.provider_session_id.is_none()) {
             return Err(AppError::machine("HARNESS_RESUME_NO_ID"));
@@ -255,6 +259,7 @@ impl HarnessRuntime {
                 }
             }
             // The probe is display-only (the Pi floor gate is the one exception):
+            mark("environment-and-command-ready");
             // keep it off the connect path — a shim probe through cmd/PowerShell
             // costs seconds — and publish the answer via the snapshot overlay.
             if let Some(gate) = harness.version_gate() {
@@ -295,6 +300,7 @@ impl HarnessRuntime {
                     }
                 });
             }
+            mark("hooks-begin");
             let hooks = match prepare_hook_launch(kind, &signals, workspace, &terminal_id, bin_dir).await {
                 Ok(hooks) => {
                     crate::debuglog::info_term("harness", &terminal_id, &format!("hooks installed kind={kind}"));
@@ -306,8 +312,8 @@ impl HarnessRuntime {
                 }
             };
             env.extend(hooks.env);
+            mark("hooks-ready");
             let canvas_dark = tweaks.dark_canvas
-                || (workspace.kind == "local" && cfg!(windows))
                 || crate::terminal_theme::app_dark();
             env.insert("COLORFGBG".into(), crate::terminal_theme::colorfgbg(canvas_dark).into());
             env.insert("COLORTERM".into(), "truecolor".into());
@@ -335,7 +341,7 @@ impl HarnessRuntime {
                         command
                     );
                     let term_id = format!("card_{card_id}");
-                    let wrapped = crate::ssh::wrap_remote_tmux(&term_id, &workspace.cwd, &inner_exec);
+                    let wrapped = crate::ssh::wrap_remote_tmux_with_channel(&term_id, &workspace.cwd, &inner_exec, Some(&terminal_id));
                     format!("cd {} && {}{}", crate::ssh::shell_quote(&workspace.cwd), unset, wrapped)
                 } else {
                     format!(
@@ -427,7 +433,9 @@ impl HarnessRuntime {
             if process_hook_osc {
                 let hook_ok = catch_unwind(AssertUnwindSafe(|| {
                     if let Ok(mut osc) = osc.lock() {
-                        if let Some(signal) = osc.push(data) {
+                        let mut incoming = data;
+                        while let Some(signal) = osc.push(incoming) {
+                            incoming = "";
                             let mut map = probes.lock();
                             if let Some(current) = map.get(&id_cb).cloned() {
                                 let mut next = observe_hook(current.clone(), signal.clone());
@@ -565,6 +573,7 @@ impl HarnessRuntime {
             }
         });
 
+        mark("pty-begin");
         terminals.create(
             workspace.runtime_cwd.clone(),
             100,
@@ -574,6 +583,7 @@ impl HarnessRuntime {
             true,
             Some(on_output),
         )?;
+        mark("pty-created");
         // Per-harness canvas pinning (e.g. Grok's own dark canvas) intentionally
         // lives outside this pipeline; the frontend owns per-harness theming.
 

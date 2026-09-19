@@ -11,15 +11,8 @@ import { ATTENTION_MODES } from "@/lib/attention-mode";
 import { SUBMISSION_BEHAVIORS } from "@/lib/submission-behavior";
 import { announceQueueToast } from "@/lib/queue-toast";
 import { THEME_OPTIONS } from "@/lib/theme";
-import { TERMINAL_BACKGROUND_OPTIONS } from "@/lib/terminal-background";
-import { useTerminalBackground } from "@/hooks/useTerminalBackground";
+import { TerminalSettings } from "./TerminalSettings";
 import { ThemeIcon } from "./ThemeIcon";
-import {
-  CHAT_CONTENT_FONT_SIZE_DEFAULT,
-  CHAT_CONTENT_FONT_SIZE_MAX,
-  CHAT_CONTENT_FONT_SIZE_MIN,
-  useChatAppearance,
-} from "@/hooks/useChatAppearance";
 import { setLastSettingsSection, SETTINGS_SECTION_VALUES, type SettingsSection } from "@/lib/settings-navigation";
 import { RemoteHostsSettings } from "./RemoteHostsSettings";
 import { ExternalSessionsSettings } from "./ExternalSessionsSettings";
@@ -52,6 +45,7 @@ export function SettingsSectionIcon({ section, size = 16, strokeWidth = 1.8 }: {
     className: "settings-section-icon",
   };
   if (section === "remote-hosts") return <svg {...common}><rect x="4" y="3" width="16" height="7" rx="2" /><rect x="4" y="14" width="16" height="7" rx="2" /><path d="M8 6h.01M8 17h.01M12 6h5M12 17h5" /></svg>;
+  if (section === "terminal") return <svg {...common}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="m7 9 3 3-3 3M13 15h4" /></svg>;
   if (section === "external-sessions") {
     return (
       <svg {...common}>
@@ -70,10 +64,9 @@ function GeneralSettings() {
   const audio = useAudio();
   const [audioBlocked, setAudioBlocked] = useState(false);
   const { preference, setThemePreference } = useTheme();
-  const { background: terminalBackground, setBackground: setTerminalBackground } = useTerminalBackground();
   const { mode: attentionMode, setMode: setAttentionMode } = useAttentionMode();
   const { mode: submissionBehavior, setMode: setSubmissionBehavior } = useSubmissionBehavior();
-  const { fontSize, setFontSize } = useChatAppearance();
+
   const [debugLogging, setDebugLogging] = useState(false);
   const [logStatus, setLogStatus] = useState("");
 
@@ -99,22 +92,6 @@ function GeneralSettings() {
               <label key={option.id} className="settings-theme-option">
                 <input type="radio" name="theme" value={option.id} checked={selected} onChange={() => setThemePreference(option.id)} className="sr-only" />
                 <ThemeIcon preference={option.id} />
-                <span className="settings-theme-option-label">{t(option.label)}</span>
-              </label>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="settings-general-section">
-        <h3 className="settings-general-heading">{t("settings.terminalBackground")}</h3>
-        <p className="settings-general-description">{t("settings.terminalBackgroundDescription")}</p>
-        <div role="radiogroup" aria-label={t("settings.terminalBackground")} className="settings-theme-options">
-          {TERMINAL_BACKGROUND_OPTIONS.map((option) => {
-            const selected = terminalBackground === option.id;
-            return (
-              <label key={option.id} className="settings-theme-option">
-                <input type="radio" name="terminal-background" value={option.id} checked={selected} onChange={() => setTerminalBackground(option.id)} className="sr-only" />
                 <span className="settings-theme-option-label">{t(option.label)}</span>
               </label>
             );
@@ -203,40 +180,6 @@ function GeneralSettings() {
       </section>
 
       <section className="settings-general-section">
-        <h3 className="settings-general-heading">{t("settings.chat")}</h3>
-        <div className="settings-chat-options">
-          <div className="settings-chat-option settings-chat-range-option">
-            <div className="settings-chat-range-header">
-              <label htmlFor="settings-chat-content-font-size">{t("settings.chatContentFontSize")}</label>
-              <output htmlFor="settings-chat-content-font-size">{fontSize}px</output>
-              <ConfigButton
-                variant="ghost"
-                size="small"
-                className="settings-chat-reset"
-                title={t("settings.resetChatContentFontSize")}
-                aria-label={t("settings.resetChatContentFontSize")}
-                disabled={fontSize === CHAT_CONTENT_FONT_SIZE_DEFAULT}
-                onClick={() => setFontSize(CHAT_CONTENT_FONT_SIZE_DEFAULT)}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5" />
-                </svg>
-              </ConfigButton>
-            </div>
-            <input
-              id="settings-chat-content-font-size"
-              type="range"
-              min={CHAT_CONTENT_FONT_SIZE_MIN}
-              max={CHAT_CONTENT_FONT_SIZE_MAX}
-              step={1}
-              value={fontSize}
-              onChange={(event) => setFontSize(Number(event.target.value))}
-            />
-          </div>
-        </div>
-      </section>
-
-      <section className="settings-general-section">
         <h3 className="settings-general-heading">{t("settings.diagnostics")}</h3>
         <p className="settings-general-description">{t("settings.debugLoggingDescription")}</p>
         <div className="settings-chat-options">
@@ -300,6 +243,7 @@ export function SettingsPanel({ initialSection, onClose }: Props) {
   const [mountedSections, setMountedSections] = useState<ReadonlySet<SettingsSection>>(() => new Set([section]));
   const sections: { id: SettingsSection; label: string }[] = [
     { id: "general", label: t("settings.general") },
+    { id: "terminal", label: t("settings.terminal") },
     { id: "remote-hosts", label: t("machines.settings") },
     { id: "external-sessions", label: t("settings.externalSessions") },
   ];
@@ -323,7 +267,7 @@ export function SettingsPanel({ initialSection, onClose }: Props) {
   };
 
   const sectionHost = (id: SettingsSection, content: ReactNode) => mountedSections.has(id) ? (
-    <div key={id} hidden={section !== id} className={`settings-section-host${id === "general" || id === "external-sessions" ? " is-general" : ""}`}>
+    <div key={id} hidden={section !== id} className={`settings-section-host${id !== "remote-hosts" ? " is-general" : ""}`}>
       {content}
     </div>
   ) : null;
@@ -358,6 +302,7 @@ export function SettingsPanel({ initialSection, onClose }: Props) {
           {sectionHost("remote-hosts", <RemoteHostsSettings />)}
           {sectionHost("external-sessions", <ExternalSessionsSettings />)}
           {sectionHost("general", <GeneralSettings />)}
+          {sectionHost("terminal", <TerminalSettings />)}
         </main>
       </div>
     </div>

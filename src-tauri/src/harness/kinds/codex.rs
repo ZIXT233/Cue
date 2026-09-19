@@ -38,7 +38,15 @@ fn resume_args(session_id: &str) -> AppResult<Vec<String>> {
 
 /// Que's entries in the CLI's own config are recognised by the ingress path they run.
 /// That is how an earlier install is told apart from hooks the user wrote themselves.
-const MARKER: [&str; 2] = ["harness-plugins/codex/hook.cjs", "harness-plugins\\codex\\hook.cjs"];
+/// The third form is what actually lands in the file: TOML escapes backslashes inside
+/// "strings", so the written block only matches the doubled-backslash marker — missing
+/// it made every app start append a duplicate block.
+const MARKER: [&str; 4] = [
+    "# Que session state hook",
+    "harness-plugins/codex/hook.cjs",
+    "harness-plugins\\codex\\hook.cjs",
+    "harness-plugins\\\\codex\\\\hook.cjs",
+];
 
 async fn plan(ctx: Ctx<'_>, events: &'static [&'static str]) -> AppResult<Plan> {
     let mut plan = Plan::default();
@@ -90,24 +98,40 @@ impl Harness for Codex {
             return;
         }
         let config = dir.join("config.toml");
-        let existing = std::fs::read_to_string(&config).unwrap_or_default();
+        let mut existing = std::fs::read_to_string(&config).unwrap_or_default();
         if MARKER.iter().any(|marker| existing.contains(marker)) {
             // Already registered by an earlier run: appending again would double every
             // event. It can still be the *shape* an earlier Que wrote, though — that one
             // has to be rewritten in place, or Codex keeps refusing to load the file and
             // the user cannot even reach the prompt that would trust these hooks.
             let repaired = repair_headers(&existing, self.events());
-            if repaired != existing {
-                let _ = atomic_write(&config, &repaired);
+            let stripped = strip_registration(&repaired, self.events());
+            if stripped == repaired {
+                if repaired != existing { let _ = atomic_write(&config, &repaired); }
+                return; // Not a complete owned block: never replace user hooks.
             }
-            return;
+            existing = stripped;
         }
+        // Rebuild only the complete owned block so quoting/runtime fixes also
+        // reach previously registered external sessions.
+        #[cfg(windows)]
+        let cmd = crate::harness::windows::windows_hook_command(&ctx.node, &ctx.hook_path("codex"), None);
+        #[cfg(not(windows))]
         let cmd = format!("{} \"{}\"", ctx.node, ctx.hook_path("codex"));
+        let timeout = super::registry::default_hook_timeout(cfg!(windows));
         let mut to_append = String::new();
-        if !existing.contains("[features]") {
+        let existing = if existing.contains("[features]") {
+            // The user already has a [features] table. Appending a second one is
+            // invalid TOML, and without `hooks = true` the registration block
+            // below does nothing — Que-launched sessions can turn the feature
+            // on with `--enable hooks`, but external sessions only read this
+            // file, so the flag has to live in the user's own table.
+            enable_hooks_feature(&existing)
+        } else {
             to_append.push_str("\n[features]\nhooks = true\n");
-        }
-        to_append.push_str(&registration_block(&cmd, self.events()));
+            existing
+        };
+        to_append.push_str(&registration_block(&cmd, self.events(), timeout));
         // The user's own config, written atomically: a torn write here costs them every
         // Codex session, not just Que's entries.
         let _ = atomic_write(&config, &format!("{existing}\n{to_append}"));
@@ -123,6 +147,22 @@ impl Harness for Codex {
 
     fn exit_session_id(&self, read_output: &dyn Fn() -> Option<String>) -> Option<String> {
         codex_exit_session_id(&read_output()?)
+    }
+
+    /// Strip the block `global` appended — the settings toggle's other half. Only
+    /// Que's own groups are removed; user-written `[[hooks.*]]` and everything
+    /// else in the file survive byte for byte.
+    fn unglobal(&self, ctx: &GlobalCtx) {
+        let dir = std::env::var("CODEX_HOME").map(PathBuf::from).unwrap_or_else(|_| ctx.home.join(".codex"));
+        let config = dir.join("config.toml");
+        let Ok(existing) = std::fs::read_to_string(&config) else { return };
+        if !MARKER.iter().any(|marker| existing.contains(marker)) {
+            return;
+        }
+        let cleaned = strip_registration(&existing, self.events());
+        if cleaned != existing {
+            let _ = atomic_write(&config, &cleaned);
+        }
     }
 
     fn external_ingress(&self) -> bool {
@@ -531,12 +571,123 @@ fn codex_session_details(session_id: &str) -> Option<CodexSessionDetails> {
 /// table. With a single-bracket header the event key holds a map where Codex wants a
 /// sequence, which it reports as `invalid type: map, expected a sequence in 'hooks'`
 /// and treats as a reason to reject the *whole* config file.
-fn registration_block(cmd: &str, events: &'static [&'static str]) -> String {
+fn registration_block(cmd: &str, events: &'static [&'static str], timeout: u32) -> String {
     let mut out = String::from("\n# Que session state hook\n");
     for &event in events {
-        out.push_str(&format!("[[hooks.{event}]]\nhooks = [{{ type = \"command\", command = {:?}, timeout = 2 }}]\n", cmd));
+        out.push_str(&format!("[[hooks.{event}]]\nhooks = [{{ type = \"command\", command = {:?}, timeout = {timeout} }}]\n", cmd));
     }
     out
+}
+
+/// Turn `hooks = true` on inside an existing `[features]` table, inserting the
+/// line right after its header when missing. Only the first plain `[features]`
+/// header counts; subtables (`[features.x]`) and other tables are left alone.
+/// No-op when the flag is already set anywhere in that table.
+fn enable_hooks_feature(config: &str) -> String {
+    let lines: Vec<&str> = config.split_inclusive('\n').collect();
+    let mut in_features = false;
+    let mut enabled = false;
+    for line in &lines {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            in_features = trimmed == "[features]";
+            continue;
+        }
+        if in_features && trimmed.split('=').next().map(str::trim) == Some("hooks") {
+            enabled = true;
+        }
+    }
+    if enabled {
+        return config.to_string();
+    }
+    let mut out = String::with_capacity(config.len() + "hooks = true\n".len());
+    let mut inserted = false;
+    for line in &lines {
+        out.push_str(line);
+        if !inserted {
+            let trimmed = line.trim_end();
+            if trimmed == "[features]" {
+                out.push_str("hooks = true\n");
+                inserted = true;
+            }
+        }
+    }
+    if inserted { out } else { config.to_string() }
+}
+
+/// Remove the block `registration_block` appended. The block is contiguous: the
+/// marker comment, then one group per event — a `[[hooks.<Event>]]` header (each
+/// event at most once) and a single `hooks = [` body line, blank lines between.
+/// Removal only commits when **every** event was found: a group Que did not
+/// write (a user's own `[[hooks.Stop]]` directly after the block, say) ends the
+/// scan and is kept, and an incomplete block is left completely untouched.
+fn strip_registration(config: &str, events: &[&str]) -> String {
+    let lines: Vec<&str> = config.split_inclusive('\n').collect();
+    let Some(marker) = lines.iter().position(|line| line.trim() == "# Que session state hook") else {
+        return config.to_string();
+    };
+    let mut seen: Vec<&str> = Vec::new();
+    let mut expecting_body = false;
+    let mut end = marker + 1;
+    while end < lines.len() {
+        let trimmed = lines[end].trim_end();
+        if trimmed.is_empty() {
+            end += 1;
+            continue;
+        }
+        if !expecting_body {
+            let event = trimmed
+                .strip_prefix("[[hooks.")
+                .and_then(|header| header.strip_suffix("]]"))
+                .filter(|event| events.contains(event) && !seen.contains(event));
+            match event {
+                Some(event) => {
+                    seen.push(event);
+                    expecting_body = true;
+                    end += 1;
+                    continue;
+                }
+                None => break,
+            }
+        }
+        if trimmed.starts_with("hooks = [") && owned_hook_body(trimmed) {
+            expecting_body = false;
+            end += 1;
+            continue;
+        }
+        break;
+    }
+    if seen.len() != events.len() || expecting_body {
+        return config.to_string();
+    }
+    // The block was appended with a leading blank; it goes out with the block.
+    let mut start = marker;
+    while start > 0 && lines[start - 1].trim().is_empty() {
+        start -= 1;
+    }
+    let mut out = String::with_capacity(config.len());
+    for line in lines.iter().take(start).chain(lines.iter().skip(end)) {
+        out.push_str(line);
+    }
+    out
+}
+
+// A marker comment alone does not authorize replacing commands the user edited.
+// Decode our Windows wrapper before checking the installed ingress path.
+fn owned_hook_body(body: &str) -> bool {
+    let pattern = regex::Regex::new(r#"command\s*=\s*("(?:\\.|[^"\\])*")"#).unwrap();
+    let commands: Vec<_> = pattern.captures_iter(body).collect();
+    commands.len() == 1 && commands.iter().all(|capture| {
+        let Ok(command) = serde_json::from_str::<String>(&capture[1]) else { return false };
+        let decoded = command.split_once("-EncodedCommand ").and_then(|(_, value)| {
+            let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, value.trim()).ok()?;
+            if bytes.len() % 2 != 0 { return None; }
+            let units: Vec<u16> = bytes.chunks_exact(2).map(|x| u16::from_le_bytes([x[0], x[1]])).collect();
+            String::from_utf16(&units).ok()
+        });
+        let text = decoded.as_deref().unwrap_or(&command).replace('\\', "/");
+        text.contains("harness-plugins/codex/hook.cjs")
+    })
 }
 
 /// Rewrite the headers an earlier Que wrote as tables into the arrays Codex wants.
@@ -567,11 +718,59 @@ mod tests {
     /// reject the file — and the failure then looks like a Que problem, not a typo.
     #[test]
     fn registered_events_are_arrays_of_groups() {
-        let block = registration_block("/usr/bin/node \"/tmp/que/hook.cjs\"", EVENTS);
+        let block = registration_block("/usr/bin/node \"/tmp/que/hook.cjs\"", EVENTS, 2);
         for &event in EVENTS {
             assert!(block.contains(&format!("[[hooks.{event}]]\n")), "{event} must be an array of tables");
             assert!(!block.contains(&format!("\n[hooks.{event}]\n")), "{event} must not be a table");
         }
+    }
+
+    /// The feature flag goes into the user's own [features] table, right after
+    /// its header, instead of appending an invalid second table.
+    #[test]
+    fn hooks_feature_is_enabled_inside_an_existing_features_table() {
+        let config = "[features]\ngoals = true\n\n[projects.'c:\\x']\ntrust_level = \"trusted\"\n";
+        let fixed = enable_hooks_feature(config);
+        assert!(fixed.contains("[features]\nhooks = true\ngoals = true\n"));
+        assert_eq!(fixed.matches("[features]").count(), 1);
+        // Already enabled: untouched. No [features] at all: untouched.
+        assert_eq!(enable_hooks_feature("[features]\nhooks = true\n"), "[features]\nhooks = true\n");
+        assert_eq!(enable_hooks_feature("[model]\nname = \"gpt\"\n"), "[model]\nname = \"gpt\"\n");
+        // Subtables are not the plain table, and other tables' hooks keys don't count.
+        assert_eq!(enable_hooks_feature("[features.other]\nx = 1\n"), "[features.other]\nx = 1\n");
+        assert_eq!(enable_hooks_feature("[hooks.state]\nhooks = true\n"), "[hooks.state]\nhooks = true\n");
+    }
+
+    /// The un-install drops exactly the appended block. A user group with the
+    /// same event name directly after it ends the scan and survives; an
+    /// incomplete block (fewer groups than events) is left untouched entirely.
+    #[test]
+    fn strip_removes_only_the_que_block() {
+        let head = "[features]\nhooks = true\n";
+        let tail = "[mcp_servers.x]\ncommand = 'x'\n";
+        let block = registration_block("node C:/x/harness-plugins/codex/hook.cjs", EVENTS, 15);
+        let user_group = "[[hooks.Stop]]\nhooks = [{ type = \"command\", command = \"user own\", timeout = 9 }]\n";
+
+        // Adjacent same-event user group: our block strips, the user's survives.
+        let config = format!("{head}{block}{user_group}{tail}");
+        let cleaned = strip_registration(&config, EVENTS);
+        assert_eq!(cleaned, format!("{head}{user_group}{tail}"));
+
+        // Incomplete block (groups missing): safety beats tidiness, no removal.
+        let partial = format!("{head}# Que session state hook\n[[hooks.Stop]]\nhooks = []\n{tail}");
+        assert_eq!(strip_registration(&partial, EVENTS), partial);
+    }
+
+    #[test]
+    fn encoded_registration_is_replaceable_but_user_edits_are_preserved() {
+        let command = crate::harness::windows::windows_hook_command("C:/Program Files/node.exe", "C:/Que/harness-plugins/codex/hook.cjs", None);
+        let block = registration_block(&command, EVENTS, 15);
+        assert!(MARKER.iter().any(|marker| block.contains(marker)));
+        assert_eq!(strip_registration(&block, EVENTS), "");
+        let edited = block.replacen(&serde_json::to_string(&command).unwrap(), "\"user-custom-hook\"", 1);
+        assert_eq!(strip_registration(&edited, EVENTS), edited);
+        let missing_last_body = block[..block.rfind("hooks = [").unwrap()].to_string();
+        assert_eq!(strip_registration(&missing_last_body, EVENTS), missing_last_body);
     }
 
     /// An install written before the shape was corrected is repaired in place, and the
@@ -586,7 +785,7 @@ mod tests {
         assert!(fixed.contains(entry), "the group itself must not be touched");
         // Repairing twice must not stack a third bracket, and a correct block is a no-op.
         assert_eq!(repair_headers(&fixed, EVENTS), fixed);
-        let block = registration_block("node", EVENTS);
+        let block = registration_block("node", EVENTS, 2);
         assert_eq!(repair_headers(&block, EVENTS), block);
     }
 

@@ -1,9 +1,39 @@
 /* eslint-disable @typescript-eslint/no-require-imports -- Standalone passive CLI hook. */
 // Shared ingress for built-in CLI adapters. Public contract: docs/harness/hook-api.md
+
+// TEMPORARY lifecycle debug logging: append-only, never blocks the hook. Remove
+// once the codex Windows hook failures are fully diagnosed.
+const DEBUG_LOG = require('path').join(__dirname, 'hook-debug.jsonl');
+function dbg(stage, extra = {}) {
+  try {
+    require('fs').appendFileSync(
+      DEBUG_LOG,
+      JSON.stringify({
+        ts: new Date().toISOString(),
+        pid: process.pid,
+        ppid: process.ppid,
+        stage,
+        cwd: process.cwd(),
+        ...extra,
+      }) + '\n'
+    );
+  } catch {}
+}
+dbg('process-start', { argv: process.argv.slice(2) });
+process.on('uncaughtException', err => {
+  dbg('uncaught-exception', { message: err.message, stack: err.stack });
+  process.exit(91);
+});
+process.on('unhandledRejection', err => {
+  dbg('unhandled-rejection', { message: String(err), stack: err?.stack });
+  process.exit(92);
+});
+
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
+const { execFileSync } = require('node:child_process');
 const explicitEvent = process.argv[2];
 const cursorEvents = new Set(['sessionStart', 'beforeSubmitPrompt', 'preToolUse', 'postToolUse', 'postToolUseFailure', 'beforeShellExecution', 'beforeMCPExecution', 'afterAgentResponse', 'stop', 'sessionEnd']);
 function cursorReply(event) {
@@ -51,12 +81,14 @@ function finish() {
 }
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', chunk => {
+  dbg('stdin-data', { bytes: Buffer.byteLength(chunk) });
   if (input.length + chunk.length > 1024 * 1024) { oversized = true; input = ''; finish(); return; }
   input += chunk;
   consume();
 });
-process.stdin.on('error', () => finish());
-process.stdin.on('end', () => { consume(); finish(); });
+process.stdin.on('error', () => { dbg('stdin-error'); finish(); });
+process.stdin.on('end', () => { dbg('stdin-end'); consume(); finish(); });
+process.on('exit', code => { dbg('process-exit', { code }); });
 
 function readActive() {
   try { return JSON.parse(fs.readFileSync(activePath, 'utf8')); }
@@ -158,12 +190,31 @@ function consume() {
         fs.renameSync(temporary, target);
       } catch {}
     }
-    const channel = token;
+    let channel = token;
+    // Reattaching a persistent tmux pane creates a new local reader, but the
+    // running CLI keeps its old environment. Resolve the current channel from
+    // this Que session instead of silently sending every hook to the old one.
+    if (token && process.env.TMUX && process.env.QUE_HARNESS_TMUX_SESSION) {
+      try {
+        const value = execFileSync('tmux', ['show-environment', '-t', `=${process.env.QUE_HARNESS_TMUX_SESSION}`, 'QUE_HARNESS_CHANNEL'], {
+          encoding: 'utf8', timeout: 500, maxBuffer: 4096, stdio: ['ignore', 'pipe', 'pipe'],
+        }).trim();
+        const current = value.match(/^QUE_HARNESS_CHANNEL=([A-Za-z0-9_-]{1,128})$/);
+        if (current) channel = current[1];
+      } catch (error) {
+        dbg('tmux-channel-unavailable', { message: error instanceof Error ? error.message : String(error) });
+      }
+    }
     const delivered = { osc: false, file: false, oscError: undefined, fileError: undefined };
     if (channel) {
       try {
         const signal = Buffer.from(JSON.stringify({ token: channel, signal: event })).toString('base64');
-        fs.writeFileSync(process.env.QUE_HARNESS_TTY || '/dev/tty', `\x1b]777;que;${signal}\x07`);
+        const osc = `\x1b]777;que;${signal}\x07`;
+        // tmux consumes unrecognized OSC instead of forwarding it. Its DCS
+        // passthrough envelope doubles each ESC and delivers the original OSC
+        // to Que outside the multiplexer.
+        const frame = process.env.TMUX ? `\x1bPtmux;${osc.replace(/\x1b/g, '\x1b\x1b')}\x1b\\` : osc;
+        fs.writeFileSync(process.env.QUE_HARNESS_TTY || '/dev/tty', frame);
         delivered.osc = true;
       } catch (error) {
         delivered.oscError = error instanceof Error ? error.message : String(error);

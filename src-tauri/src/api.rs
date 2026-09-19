@@ -187,7 +187,9 @@ fn launch_identity_changed(
 }
 
 async fn launch_harness(state: &AppState, body: &Value, action: &str) -> AppResult<CardQueue> {
+    let started = std::time::Instant::now();
     let id = body.get("id").and_then(|v| v.as_str()).ok_or_else(|| AppError::machine("CARD_ID_INVALID"))?;
+    crate::debuglog::info_card("harness", id, None, &format!("startup request action={action}"));
     let _guard = try_acquire_launch(state, id)?;
     let captured = state.queue.with_queue(true, |queue| {
         refresh_queue(queue, state);
@@ -227,6 +229,7 @@ async fn launch_harness(state: &AppState, body: &Value, action: &str) -> AppResu
         .or_else(|| captured.0.harness.as_ref().and_then(|h| h.tmux))
         .or_else(|| resume.as_ref().and_then(|r| r.tmux))
         .unwrap_or(captured.1.kind == "ssh");
+    crate::debuglog::info_card("harness", id, None, &format!("startup queue-ready elapsed_ms={}", started.elapsed().as_millis()));
     let launched = match state.harness.launch(id, kind, &captured.1, resume.clone(), &state.terminals, &state.settings, &state.bin_dir, use_tmux).await {
         Ok(session) => session,
         Err(error) => {
@@ -239,7 +242,7 @@ async fn launch_harness(state: &AppState, body: &Value, action: &str) -> AppResu
         "harness",
         id,
         Some(&launched.terminal_id),
-        &format!("launch kind={kind} action={action} state={}", launched.state),
+        &format!("launch kind={kind} action={action} state={} request_elapsed_ms={}", launched.state, started.elapsed().as_millis()),
     );
     let previous_id = captured.0.harness.as_ref().map(|h| h.terminal_id.clone());
     let result = state.queue.with_queue(false, |queue| {
@@ -285,6 +288,22 @@ fn kill_side_terminals(state: &AppState, card: &crate::models::QueueCard) {
 fn apply_action(queue: &mut CardQueue, body: &Value, action: &str, state: &AppState) -> AppResult<()> {
     let id = body.get("id").and_then(|v| v.as_str());
     match action {
+        "card_placement" => {
+            let background = body.get("background").and_then(Value::as_bool)
+                .ok_or_else(|| AppError::msg("缺少卡片前后台状态"))?;
+            let card = queue.cards.iter_mut().find(|c| Some(c.id.as_str()) == id)
+                .ok_or_else(|| AppError::msg("CLI 卡片不存在"))?;
+            let harness = card.harness.as_ref().ok_or_else(|| AppError::msg("请先启动 CLI"))?;
+            if card.archived_at.is_some() || card.detached.is_some() || matches!(harness.state.as_str(), "exited" | "error") {
+                return Err(AppError::msg("当前卡片无法切换前后台"));
+            }
+            card.remind_at = None;
+            card.manual_placement = Some(crate::models::ManualCardPlacement {
+                background,
+                terminal_id: harness.terminal_id.clone(),
+                observed_state: harness.state.clone(),
+            });
+        }
         "shell_background" => {
             let card = queue.cards.iter_mut().find(|c| Some(c.id.as_str()) == id).ok_or_else(|| AppError::msg("CLI 卡片不存在"))?;
             let harness = card.harness.as_mut().ok_or_else(|| AppError::msg("CLI 卡片不存在"))?;
@@ -732,11 +751,15 @@ async fn get_tools(State(state): State<AppState>) -> AppResult<impl IntoResponse
 async fn put_tools(State(state): State<AppState>, Json(body): Json<Value>) -> AppResult<impl IntoResponse> {
     if let Some(enabled) = body.get("externalNotices").and_then(|v| v.as_bool()) {
         let settings = state.settings.set_external_notices(enabled).await?;
+        // The toggle's other half: disabled kinds get their Que entries stripped
+        // from the CLIs' own configs; enabled ones are (re)installed.
+        crate::harness::sync_external_hooks(&state.bin_dir, &crate::paths::plugins_dir(), &settings);
         return Ok(Json(tools_json(&settings)));
     }
     if let Some(harness) = body.get("externalHarness").and_then(|v| v.as_str()) {
         let enabled = body.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
         let settings = state.settings.set_external_ingress(harness, enabled).await?;
+        crate::harness::sync_external_hooks(&state.bin_dir, &crate::paths::plugins_dir(), &settings);
         return Ok(Json(tools_json(&settings)));
     }
     if let Some(enabled) = body.get("debugLogging").and_then(|v| v.as_bool()) {
@@ -899,7 +922,10 @@ async fn get_terminal(State(state): State<AppState>, Path(id): Path<String>) -> 
 }
 
 async fn set_terminal_theme(State(state): State<AppState>, Json(body): Json<Value>) -> impl IntoResponse {
-    state.terminals.apply_canvas_dark(body.get("dark").and_then(|v| v.as_bool()).unwrap_or(false));
+    state.terminals.apply_canvas_theme(
+        body.get("dark").and_then(|v| v.as_bool()).unwrap_or(false),
+        body.get("refresh").and_then(|v| v.as_bool()).unwrap_or(false),
+    );
     StatusCode::NO_CONTENT
 }
 
@@ -907,7 +933,7 @@ async fn set_terminal_theme(State(state): State<AppState>, Json(body): Json<Valu
 /// bundled modern ConPTY is unavailable and the inbox kernel32 build is in use.
 async fn get_terminal_theme() -> impl IntoResponse {
     let conpty_fallback = cfg!(windows) && !crate::conpty::sideloaded();
-    Json(json!({ "conptyFallback": conpty_fallback }))
+    Json(json!({ "conptyFallback": conpty_fallback, "windowsBuild": crate::conpty::host_build_number() }))
 }
 
 async fn create_terminal(State(state): State<AppState>, Json(body): Json<Value>) -> impl IntoResponse {

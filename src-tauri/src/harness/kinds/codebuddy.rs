@@ -39,6 +39,12 @@ impl Harness for CodeBuddy {
         let _ = ctx.install_ingress("codebuddy");
     }
 
+    /// The manifest external CodeBuddy sessions read; the next card launch
+    /// rewrites it when the kind is enabled again.
+    fn unglobal(&self, ctx: &GlobalCtx) {
+        let _ = std::fs::remove_file(ctx.plugins.join("codebuddy").join("hooks").join("hooks.json"));
+    }
+
     fn external_ingress(&self) -> bool {
         true
     }

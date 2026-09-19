@@ -108,6 +108,36 @@ impl Harness for Claude {
         }
     }
 
+    /// Remove the entries `global` merged in — Que's groups drop out of every
+    /// event list (empty lists go with them), user-written hooks stay.
+    fn unglobal(&self, ctx: &GlobalCtx) {
+        let settings = ctx.home.join(".claude").join("settings.json");
+        let Ok(existing) = std::fs::read_to_string(&settings) else { return };
+        let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&existing) else { return };
+        let mut changed = false;
+        if let Some(obj) = value.as_object_mut() {
+            if let Some(hooks) = obj.get_mut("hooks").and_then(|h| h.as_object_mut()) {
+                for &event in self.events() {
+                    if let Some(entries) = hooks.get_mut(event).and_then(|v| v.as_array_mut()) {
+                        let before = entries.len();
+                        entries.retain(|group| {
+                            let text = group.to_string();
+                            !text.contains("harness-plugins/claude/hook.cjs")
+                                && !text.contains("harness-plugins\\claude\\hook.cjs")
+                        });
+                        changed |= entries.len() != before;
+                        if entries.is_empty() {
+                            hooks.remove(event);
+                        }
+                    }
+                }
+            }
+        }
+        if changed {
+            let _ = atomic_write(&settings, &serde_json::to_string_pretty(&value).unwrap_or_default());
+        }
+    }
+
     fn external_ingress(&self) -> bool {
         true
     }

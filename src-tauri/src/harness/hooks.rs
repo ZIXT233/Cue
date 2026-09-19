@@ -1,7 +1,7 @@
 use super::install::{GlobalCtx, Host};
 use super::registry::{self, Ctx};
 use crate::error::AppResult;
-use crate::models::QueueWorkspace;
+use crate::models::{AppSettings, QueueWorkspace};
 use crate::paths::{atomic_write, signal_dir};
 use std::collections::HashMap;
 use std::path::Path;
@@ -72,13 +72,17 @@ pub fn sync_installed_hooks(bin_dir: &Path, plugins: &Path) -> Vec<String> {
     refreshed
 }
 
-/// Install the hooks that serve sessions Que never launched — IDE chats, plain terminals.
-/// Their user-level config is global, so one pass covers all of them. Each harness owns
-/// its own file (`kinds/<kind>.rs::global`); nothing here knows one from another.
-pub fn deploy_external_hooks(bin_dir: &Path, plugins: &Path) {
+/// Install the hooks that serve sessions Que never launched for every kind the
+/// settings enable, and strip the entries of disabled ones — the toggle's other
+/// half, so switching a kind off leaves no Que configuration behind.
+pub fn sync_external_hooks(bin_dir: &Path, plugins: &Path, settings: &AppSettings) {
     let ctx = GlobalCtx::new(bin_dir, plugins);
     for harness in registry::ALL {
-        harness.global(&ctx);
+        if settings.is_external_ingress_enabled(harness.id()) {
+            harness.global(&ctx);
+        } else {
+            harness.unglobal(&ctx);
+        }
     }
 }
 

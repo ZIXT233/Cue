@@ -59,6 +59,10 @@ impl Harness for Pi {
     fn global(&self, ctx: &GlobalCtx) {
         let _ = ctx.install_plugin("pi", "harness-pi.mjs", "pi-extension.mjs");
     }
+    /// Remove the extension copy `global` laid down; the next card launch rewrites it.
+    fn unglobal(&self, ctx: &GlobalCtx) {
+        let _ = std::fs::remove_file(ctx.plugins.join("pi").join("pi-extension.mjs"));
+    }
 
     fn external_ingress(&self) -> bool {
         true

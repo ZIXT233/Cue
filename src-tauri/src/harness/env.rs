@@ -8,48 +8,85 @@ const END: &str = "__QUE_ENV_END__";
 
 /// The dump spawns PowerShell (Windows) or a login shell (Unix) and costs
 /// seconds per call; the result only seeds child env and command resolution,
-/// so reuse a fresh one for a short window. `force` bypasses and refreshes.
+/// so reuse a fresh snapshot. Windows returns a stale snapshot immediately
+/// while refreshing in the background; edits no longer require an app restart.
+/// First capture and explicit refresh are bounded and share one capture lock.
 const ENV_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(60);
+const ENV_CAPTURE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 static ENV_CACHE: tokio::sync::Mutex<Option<(std::time::Instant, HashMap<String, String>)>> =
     tokio::sync::Mutex::const_new(None);
+static ENV_REFRESH: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 pub async fn local_environment(force: bool) -> AppResult<HashMap<String, String>> {
     if !force {
-        let cached = ENV_CACHE.lock().await;
-        if let Some((at, env)) = cached.as_ref() {
-            if at.elapsed() < ENV_CACHE_TTL {
-                return Ok(env.clone());
+        let cached = ENV_CACHE.lock().await.clone();
+        if let Some((at, env)) = cached {
+            if at.elapsed() < ENV_CACHE_TTL { return Ok(env); }
+            if cfg!(windows) {
+                if let Ok(guard) = ENV_REFRESH.try_lock() {
+                    // Throttle failed refreshes as well; keep the last good value.
+                    if let Some((at, _)) = ENV_CACHE.lock().await.as_mut() { *at = std::time::Instant::now(); }
+                    tokio::spawn(async move {
+                        let _guard = guard;
+                        if let Err(error) = refresh_environment().await {
+                            crate::debuglog::info("harness", &format!("background shell environment refresh failed: {error}"));
+                        }
+                    });
+                }
+                return Ok(env);
             }
         }
     }
+    let _guard = ENV_REFRESH.lock().await;
+    // Another first launch may already have filled the cache while we waited.
+    if !force {
+        if let Some((at, env)) = ENV_CACHE.lock().await.as_ref() {
+            if at.elapsed() < ENV_CACHE_TTL { return Ok(env.clone()); }
+        }
+    }
+    refresh_environment().await
+}
+
+async fn refresh_environment() -> AppResult<HashMap<String, String>> {
     let env = dump_local_environment().await?;
     *ENV_CACHE.lock().await = Some((std::time::Instant::now(), env.clone()));
     Ok(env)
 }
 
+async fn bounded_output(command: &mut tokio::process::Command, timeout: std::time::Duration) -> AppResult<std::process::Output> {
+    command.stdin(std::process::Stdio::null()).kill_on_drop(true).no_window();
+    tokio::time::timeout(timeout, command.output()).await
+        .map_err(|_| crate::error::AppError::msg("读取用户 Shell 环境超时，请检查 Shell 启动配置"))?
+        .map_err(|e| crate::error::AppError::msg(format!("读取用户 Shell 环境失败：{e}")))
+}
+
 async fn dump_local_environment() -> AppResult<HashMap<String, String>> {
-    let output = if cfg!(windows) {
+    let mut process = if cfg!(windows) {
         let command = format!(
             "$e=@{{}};[Environment]::GetEnvironmentVariables().GetEnumerator()|ForEach-Object{{$e[$_.Key]=[string]$_.Value}};[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false);[Console]::Write('{START}');[Console]::Write(($e|ConvertTo-Json -Compress));[Console]::Write('{END}')"
         );
-        tokio::process::Command::new("powershell.exe").args(["-NoLogo", "-Command", &command]).no_window().output().await
+        let mut process = tokio::process::Command::new("powershell.exe");
+        process.args(["-NoLogo", "-NonInteractive", "-Command", &command]);
+        process
     } else {
         let command = format!("printf '{START}\\0'; /usr/bin/env -0; printf '{END}\\0'");
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-        tokio::process::Command::new(shell).args(["-ilc", &command]).output().await
-    }
-    .map_err(|e| crate::error::AppError::msg(format!("读取用户 Shell 环境失败：{e}")))?;
+        let mut process = tokio::process::Command::new(shell);
+        process.args(["-ilc", &command]);
+        process
+    };
+    let output = bounded_output(&mut process, ENV_CAPTURE_TIMEOUT).await?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let start = stdout.find(START).ok_or_else(|| crate::error::AppError::machine("HARNESS_ENV_UNREADABLE"))?;
     let end = stdout[start + START.len()..].find(END).ok_or_else(|| crate::error::AppError::machine("HARNESS_ENV_UNREADABLE"))?;
     let body = &stdout[start + START.len()..start + START.len() + end];
     let mut env: HashMap<String, String> = std::env::vars().collect();
     if cfg!(windows) {
-        if let Ok(parsed) = serde_json::from_str::<HashMap<String, String>>(body) {
-            for (key, value) in parsed {
-                env.retain(|k, _| !k.eq_ignore_ascii_case(&key));
-                env.insert(key, value);
-            }
+        let parsed = serde_json::from_str::<HashMap<String, String>>(body)
+            .map_err(|_| crate::error::AppError::machine("HARNESS_ENV_UNREADABLE"))?;
+        for (key, value) in parsed {
+            env.retain(|k, _| !k.eq_ignore_ascii_case(&key));
+            env.insert(key, value);
         }
     } else {
         for item in body.split('\0').filter(|s| s.contains('=')) {
@@ -92,4 +129,22 @@ pub fn resolve_local_command(command: &str, env: &HashMap<String, String>, extra
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn stalled_capture_times_out_instead_of_holding_launches_forever() {
+        let mut command = if cfg!(windows) {
+            let mut cmd = tokio::process::Command::new("powershell.exe");
+            cmd.args(["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 30"]); cmd
+        } else {
+            let mut cmd = tokio::process::Command::new("sh");
+            cmd.args(["-c", "exec sleep 30"]); cmd
+        };
+        let start = std::time::Instant::now();
+        assert!(bounded_output(&mut command, std::time::Duration::from_millis(100)).await.is_err());
+        assert!(start.elapsed() < std::time::Duration::from_secs(3));
+    }
 }

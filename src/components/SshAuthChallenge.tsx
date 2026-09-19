@@ -38,7 +38,10 @@ export function SshAuthChallenge({ challenge, hostName, busy, error, onCancel, o
   const [password, setPassword] = useState("");
   if (!challenge || typeof document === "undefined") return null;
   const trust = challenge.kind === "trust";
-  return createPortal(<div className="machine-auth-backdrop machine-auth-theme"><form className="machine-auth-dialog" role="dialog" aria-modal="true" aria-label={t(trust ? "machines.trustTitle" : "machines.authTitle")} onKeyDown={(event) => {
+  // Portals retain their React ancestry: isolate events from the underlying
+  // picker/form so Enter submits authentication, never another workspace.
+  return createPortal(<div className="machine-auth-backdrop machine-auth-theme" onClick={event => event.stopPropagation()} onKeyUp={event => event.stopPropagation()}><form className="machine-auth-dialog" role="dialog" aria-modal="true" aria-label={t(trust ? "machines.trustTitle" : "machines.authTitle")} onKeyDown={(event) => {
+    event.stopPropagation();
     if (event.key === "Escape" && !busy) { event.preventDefault(); onCancel(); return; }
     if (event.key !== "Tab") return;
     const focusable = [...event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), [tabindex="0"]')].filter((element) => element.getClientRects().length);
@@ -47,6 +50,8 @@ export function SshAuthChallenge({ challenge, hostName, busy, error, onCancel, o
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
   }} onSubmit={(event) => {
     event.preventDefault();
+    event.stopPropagation();
+    if (busy) return;
     if (trust) onRetry(undefined, challenge.prompt);
     else onRetry(password);
     setPassword("");
@@ -67,7 +72,10 @@ export function SshConnectionWait({ hostName, busy, error, onCancel, onRetry }: 
 }) {
   const { t } = useI18n();
   if (typeof document === "undefined") return null;
-  return createPortal(<div className="machine-auth-backdrop machine-auth-theme"><section className="machine-auth-dialog machine-connection-dialog" role="dialog" aria-modal="true" aria-label={t("machines.connecting", { name: hostName })}>
+  return createPortal(<div className="machine-auth-backdrop machine-auth-theme" onClick={event => event.stopPropagation()} onKeyUp={event => event.stopPropagation()} onKeyDown={event => {
+    event.stopPropagation();
+    if (event.key === "Escape") { event.preventDefault(); onCancel(); }
+  }}><section className="machine-auth-dialog machine-connection-dialog" role="dialog" aria-modal="true" aria-label={t("machines.connecting", { name: hostName })}>
     <div className="machine-connection-wait" role={error ? "alert" : "status"}>
       <span className="machine-symbol is-remote"><WorkspaceMachineIcon name="remote" size={24} /></span>
       <strong>{hostName}</strong>

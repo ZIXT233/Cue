@@ -76,8 +76,9 @@ async function boot() {
     // Whether local sessions must keep the Campbell canvas (inbox ConPTY
     // fallback). Resolved before the first terminal renders to avoid a flip.
     const response = await fetch("/api/terminal-theme");
-    const data = await response.json() as { conptyFallback?: boolean };
+    const data = await response.json() as { conptyFallback?: boolean; windowsBuild?: number };
     if (data.conptyFallback) document.documentElement.dataset.conptyFallback = "true";
+    if (typeof data.windowsBuild === "number") document.documentElement.dataset.windowsBuild = String(data.windowsBuild);
   } catch {
     /* Default to the relaxed (theme-following) canvas. */
   }

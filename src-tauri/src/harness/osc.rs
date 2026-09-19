@@ -104,4 +104,14 @@ mod tests {
         let mut probe = HookOscProbe::new("token".into());
         assert!(probe.push(&format!("\x1b]777;que;{}\x07", encode("other", "Stop"))).is_none());
     }
+
+    #[test]
+    fn coalesced_hooks_are_drained_without_waiting_for_another_read() {
+        let mut probe = HookOscProbe::new("token".into());
+        let output = format!("\x1b]777;que;{}\x07\x1b]777;que;{}\x07",
+            encode("token", "UserPromptSubmit"), encode("token", "Stop"));
+        assert_eq!(probe.push(&output).unwrap().event, "UserPromptSubmit");
+        assert_eq!(probe.push("").unwrap().event, "Stop");
+        assert!(probe.push("").is_none());
+    }
 }

@@ -1,0 +1,5 @@
+# lld (mingw driver) auto-exports all symbols when building a DLL with no
+# explicit exports, which overflows the PE export table (max 65535).
+# Keep only explicit exports instead.
+[target.'cfg(all(windows, target_env = "gnu"))']
+rustflags = ["-C", "link-arg=-Wl,--exclude-all-symbols"]

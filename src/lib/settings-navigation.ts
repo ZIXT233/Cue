@@ -2,6 +2,7 @@ import { persistentStorage } from "./persistent-storage.ts";
 
 export const SETTINGS_SECTION_VALUES = [
   "general",
+  "terminal",
   "external-sessions",
   "remote-hosts",
 ] as const;

@@ -217,6 +217,7 @@ struct Record {
     canvas_dark: bool,
     canvas_campbell: bool,
     theme_notify: bool,
+    theme_notify_parser: crate::terminal_theme::ThemeNotifyParser,
     /// Cumulative bytes lost to backlog trimming on reconnect (see `subscribe`).
     replay_dropped_bytes: u64,
     /// How many times that happened, so a single large loss is distinguishable
@@ -365,16 +366,28 @@ impl TerminalHub {
             master: Mutex::new(Some(pair.master)),
             killer: Mutex::new(Some(killer)),
         });
+        #[cfg(windows)]
+        let handshake_channel = channel.clone();
         self.register(id.clone(), cwd, persistent, on_output, channel, probe.clone(), canvas_dark, campbell);
 
         let inner = self.inner.clone();
         let live = self.live.clone();
         std::thread::spawn(move || {
             let mut buffer = [0u8; 8192];
+            #[cfg(windows)]
+            let mut handshake = crate::conpty::sideloaded()
+                .then(crate::conpty_handshake::StartupHandshake::default);
             loop {
                 match reader.read(&mut buffer) {
                     Ok(0) => break,
-                    Ok(n) => deliver(&inner, &id, &probe, &buffer[..n]),
+                    Ok(n) => {
+                        #[cfg(windows)]
+                        if let Some(reply) = handshake.as_mut().and_then(|h| h.feed(&buffer[..n])) {
+                            let ok = handshake_channel.write(reply);
+                            crate::debuglog::info_term("pty", &id, &format!("ConPTY startup DA1 answered ok={ok}"));
+                        }
+                        deliver(&inner, &id, &probe, &buffer[..n]);
+                    }
                     Err(error) => {
                         crate::debuglog::warn_term("pty", &id, &format!("reader error: {error}"));
                         lock(&probe).last_error = Some(error.to_string());
@@ -466,6 +479,7 @@ impl TerminalHub {
             canvas_dark,
             canvas_campbell,
             theme_notify: false,
+            theme_notify_parser: crate::terminal_theme::ThemeNotifyParser::default(),
             replay_dropped_bytes: 0,
             replay_trimmed: 0,
         });
@@ -474,7 +488,12 @@ impl TerminalHub {
     /// Push a theme change to every live session that follows the app theme.
     /// Campbell-fallback records stay pinned to dark: their palette matches
     /// the inbox ConPTY's default canvas, which never follows our theme.
+    #[cfg(test)]
     pub fn apply_canvas_dark(&self, dark: bool) {
+        self.apply_canvas_theme(dark, false);
+    }
+
+    pub fn apply_canvas_theme(&self, dark: bool, refresh: bool) {
         crate::terminal_theme::set_app_dark(dark);
         let pending: Vec<(Arc<dyn Channel>, String)> = {
             let mut map = self.lock();
@@ -482,7 +501,7 @@ impl TerminalHub {
                 // Only CLIs that asked for theme reports (DECSET 2031) can
                 // consume CSI ?997;1n; for everyone else it is unexpected
                 // input that ConPTY echoes straight onto their prompt.
-                .filter(|record| !record.exited && !record.canvas_campbell && record.theme_notify && record.canvas_dark != dark)
+                .filter(|record| !record.exited && !record.canvas_campbell && record.theme_notify && (refresh || record.canvas_dark != dark))
                 .map(|record| {
                     record.canvas_dark = dark;
                     (record.channel.clone(), crate::terminal_theme::theme_change_report(dark).to_string())
@@ -799,10 +818,9 @@ fn deliver(inner: &Mutex<HashMap<String, Record>>, id: &str, probe: &Arc<Mutex<P
         let mut map = lock(inner);
         let Some(record) = map.get_mut(id) else { return };
         let data = decode_chunk(&mut record.pending, incoming);
-        // First real byte out of the CLI. Everything before this instant was the
-        // CLI booting; everything after it is the CLI working. Logged once per
-        // terminal so `pty spawn` -> `first byte` -> `starting->attention` line
-        // up in que.log and each leg gets an owner instead of one 22s mystery.
+        // First transport byte, NOT CLI readiness: ConPTY emits control queries
+        // before the application draws anything. Keep this metric distinct from
+        // the startup handshake and the harness's first lifecycle event.
         {
             let mut probe = lock(probe);
             probe.chunks += 1;
@@ -825,7 +843,9 @@ fn deliver(inner: &Mutex<HashMap<String, Record>>, id: &str, probe: &Arc<Mutex<P
         if data.is_empty() {
             return;
         }
-        record.theme_notify = crate::terminal_theme::observe_theme_notify(&data, record.theme_notify);
+        if let Some(enabled) = record.theme_notify_parser.feed(data.as_bytes()) {
+            record.theme_notify = enabled;
+        }
         record.backlog.push_str(&data);
         let from = record.offset;
         record.offset += data.len() as u64;
@@ -1060,6 +1080,9 @@ mod tests {
         lock(&channel.0).clear();
         hub.apply_canvas_dark(false);
         assert_eq!(String::from_utf8(lock(&channel.0).clone()).unwrap(), "\x1b[?997;2n");
+        lock(&channel.0).clear();
+        hub.apply_canvas_theme(false, true);
+        assert_eq!(String::from_utf8(lock(&channel.0).clone()).unwrap(), "\x1b[?997;2n");
     }
 
     #[test]
@@ -1070,6 +1093,7 @@ mod tests {
         let channel = Arc::new(CaptureChannel(Mutex::new(Vec::new())));
         hub.register(id.to_string(), "/work".into(), false, None, channel.clone(), probe, false, false);
         hub.apply_canvas_dark(true);
+        hub.apply_canvas_theme(true, true);
         assert!(lock(&channel.0).is_empty(), "a 997 report without a DECSET 2031 subscription leaks onto the prompt");
     }
 
@@ -1082,6 +1106,7 @@ mod tests {
         hub.register(id.to_string(), "/work".into(), false, None, channel.clone(), probe.clone(), true, true);
         deliver(&hub.inner, id, &probe, b"\x1b[?2031h");
         hub.apply_canvas_dark(false);
+        hub.apply_canvas_theme(false, true);
         assert!(lock(&channel.0).is_empty(), "a Campbell canvas does not follow the app theme");
     }
 

@@ -54,6 +54,10 @@ impl Harness for OpenCode {
     fn global(&self, ctx: &GlobalCtx) {
         let _ = ctx.install_plugin("opencode", "harness-opencode.mjs", "opencode-plugin.mjs");
     }
+    /// Remove the plugin copy `global` laid down; the next card launch rewrites it.
+    fn unglobal(&self, ctx: &GlobalCtx) {
+        let _ = std::fs::remove_file(ctx.plugins.join("opencode").join("opencode-plugin.mjs"));
+    }
 
     fn extra_search_dirs(&self) -> &'static [&'static str] {
         &[".opencode/bin"]

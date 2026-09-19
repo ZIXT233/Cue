@@ -83,11 +83,21 @@ pub fn reconcile(state: &mut CardQueue) {
         if card.session.is_none() && card.harness.is_none() {
             continue;
         }
-        let phase = if let Some(harness) = &card.harness {
+        let mut phase = if let Some(harness) = &card.harness {
             if harness.state == "working" { CardPhase::Working } else { CardPhase::Attention }
         } else {
             CardPhase::Attention
         };
+        if let Some(placement) = &card.manual_placement {
+            let valid = card.archived_at.is_none() && card.harness.as_ref().is_some_and(|h|
+                h.terminal_id == placement.terminal_id && h.state == placement.observed_state
+                && !matches!(h.state.as_str(), "exited" | "error"));
+            if valid {
+                phase = if placement.background { CardPhase::Working } else { CardPhase::Attention };
+            } else {
+                card.manual_placement = None;
+            }
+        }
         if card.archived_at.is_some() {
             if matches!(phase, CardPhase::Working) {
                 card.archived_at = None;
@@ -232,6 +242,7 @@ pub fn select_workspace_for_draft(state: &mut CardQueue, workspace: &QueueWorksp
         workspace_id: Some(workspace.id.clone()),
         session: None,
         phase: CardPhase::Draft,
+        manual_placement: None,
         created_at: now_ms(),
         ready_at: None,
         priority_weight: Some(workspace.default_conversation_weight.unwrap_or(0)),

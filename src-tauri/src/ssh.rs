@@ -92,12 +92,33 @@ pub async fn ssh_login_exec(host: &str, command: &str) -> AppResult<Vec<u8>> {
 
 /// Wrap a command with tmux session allowing the session to persist across disconnects/app restarts.
 pub fn wrap_remote_tmux(terminal_id: &str, cwd: &str, command: &str) -> String {
+    wrap_remote_tmux_with_channel(terminal_id, cwd, command, None)
+}
+
+pub fn wrap_remote_tmux_with_channel(terminal_id: &str, cwd: &str, command: &str, channel: Option<&str>) -> String {
     let session_name = format!("que_{}", terminal_id.replace('-', "_"));
+    let target = shell_quote(&format!("={session_name}"));
+    // set-option resolves a pane target, unlike set-environment's session
+    // target. The colon makes this the exact session's active pane; without
+    // it tmux searches for a pane/window literally named "=que_...".
+    let option_target = shell_quote(&format!("={session_name}:"));
+    // Configure the pane before the CLI emits its first hook. Older tmux
+    // versions predate this option and already permit DCS passthrough.
+    let inner = format!(
+        "export QUE_HARNESS_TMUX_SESSION={} && (tmux set-option -p -t \"$TMUX_PANE\" allow-passthrough on 2>/dev/null || :) && exec /bin/sh -c {}",
+        shell_quote(&session_name), shell_quote(command),
+    );
+    // Existing pane processes retain their original environment on reattach.
+    // Hooks read this session-local value to address the new Que reader.
+    let channel_update = channel.map(|value| format!(
+        " \\; set-environment -t {target} QUE_HARNESS_CHANNEL {}", shell_quote(value)
+    )).unwrap_or_default();
     format!(
-        "exec tmux -u new-session -A -D -s {} -c {} /bin/sh -c {} \\; set-option status off",
+        "exec tmux -u new-session -A -D -s {} -c {} /bin/sh -c {} \\; set-option -t {option_target} status off \\; set-option -t {option_target} set-titles on \\; set-option -t {option_target} set-titles-string {}{channel_update}",
         shell_quote(&session_name),
         shell_quote(cwd),
-        shell_quote(command)
+        shell_quote(&inner),
+        shell_quote("#{pane_title}"),
     )
 }
 

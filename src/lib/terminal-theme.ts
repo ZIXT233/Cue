@@ -1,6 +1,17 @@
 import type { ITheme } from "@xterm/xterm";
+import palettes from "./terminal-palettes.json";
+import type { TerminalPalette } from "./terminal-appearance";
 
 export type TerminalThemeProfile = "grok" | "campbell";
+
+export function windowsPtyOptions(localWindows: boolean, root: Pick<HTMLElement, "dataset">): { backend: "conpty"; buildNumber: number } | undefined {
+  if (!localWindows) return undefined;
+  // xterm uses 21376 as the capability threshold for ConPTY reflow. This is
+  // a capability floor for our bundled engine, not a claimed OS build.
+  if (root.dataset.conptyFallback !== "true") return { backend: "conpty", buildNumber: 21376 };
+  const build = Number(root.dataset.windowsBuild);
+  return { backend: "conpty", buildNumber: Number.isSafeInteger(build) && build > 0 ? build : 17763 };
+}
 
 export interface TerminalThemeHost {
   remote?: boolean;
@@ -89,12 +100,16 @@ export function documentCanvasDark(root: Pick<HTMLElement, "classList" | "datase
   return root.classList.contains("dark");
 }
 
-export function harnessTerminalTheme(dark: boolean, profile?: TerminalThemeProfile): ITheme {
+export function paletteTerminalTheme(dark: boolean, palette: TerminalPalette = "solarized"): ITheme {
+  return palette === "solarized" ? solarizedTerminalTheme(dark) : { ...palettes[palette][dark ? "dark" : "light"] };
+}
+
+export function harnessTerminalTheme(dark: boolean, profile?: TerminalThemeProfile, palette: TerminalPalette = "solarized"): ITheme {
   if (profile === "grok") {
     return { ...solarizedTerminalTheme(true), background: "#131313", foreground: "#d4d4d4",
       cursor: "#d4d4d4", cursorAccent: "#131313",
       selectionBackground: "#3a3a3a", selectionForeground: "#ffffff" };
   }
   if (profile === "campbell") return campbellTerminalTheme();
-  return solarizedTerminalTheme(dark);
+  return paletteTerminalTheme(dark, palette);
 }

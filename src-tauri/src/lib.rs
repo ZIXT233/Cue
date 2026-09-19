@@ -2,6 +2,8 @@ pub mod api;
 pub mod debuglog;
 mod cwd;
 mod conpty;
+#[cfg(windows)]
+mod conpty_handshake;
 mod dev_tools;
 mod error;
 mod focus;
@@ -20,6 +22,8 @@ mod terminal;
 mod terminal_theme;
 mod transcript;
 mod winproc;
+#[cfg(target_os = "windows")]
+mod tray;
 
 use api::{build_state, start_server};
 use std::sync::Mutex;
@@ -96,6 +100,14 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             crate::debuglog::init();
+            #[cfg(windows)]
+            tauri::async_runtime::spawn(async {
+                if let Err(error) = crate::harness::local_environment(false).await {
+                    crate::debuglog::log_error("preload shell environment", &error);
+                }
+            });
+            #[cfg(target_os = "windows")]
+            tray::init(app.handle())?;
             crate::debuglog::info(
                 "app",
                 &format!(
@@ -122,7 +134,13 @@ pub fn run() {
             let should_deploy_external = std::env::var("QUE_SKIP_EXTERNAL_HOOKS").is_err();
 
             if should_deploy_external {
-                crate::harness::deploy_external_hooks(&state.bin_dir, &crate::paths::plugins_dir());
+                // Settings-aware: enabled kinds install, disabled ones get their
+                // Que entries stripped (the toggle's other half).
+                crate::harness::sync_external_hooks(
+                    &state.bin_dir,
+                    &crate::paths::plugins_dir(),
+                    &state.settings.read()?,
+                );
             }
             if !aligned.is_empty() {
                 crate::debuglog::info("hooks", &format!("plugin hooks realigned: {}", aligned.join(", ")));
@@ -146,11 +164,13 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
-                    #[cfg(target_os = "macos")]
+                    #[cfg(any(target_os = "macos", target_os = "windows"))]
                     {
-                        let _ = window.hide();
+                        if let Err(error) = window.hide() {
+                            crate::debuglog::warn("app", &format!("could not hide main window: {error}"));
+                        }
                     }
-                    #[cfg(not(target_os = "macos"))]
+                    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
                     {
                         let _ = window.minimize();
                     }

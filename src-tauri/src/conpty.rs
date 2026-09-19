@@ -17,6 +17,32 @@
 
 use std::path::Path;
 
+/// The bundled engine supports modern reflow independently of the OS build.
+/// For the inbox engine report the actual OS version, never a guessed build.
+pub fn host_build_number() -> Option<u32> {
+    #[cfg(windows)]
+    {
+        #[repr(C)]
+        struct Version { size: u32, major: u32, minor: u32, build: u32, platform: u32, service_pack: [u16; 128] }
+        #[link(name = "ntdll")]
+        extern "system" { fn RtlGetVersion(version: *mut Version) -> i32; }
+        let mut version = Version { size: std::mem::size_of::<Version>() as u32, major: 0, minor: 0, build: 0, platform: 0, service_pack: [0; 128] };
+        if unsafe { RtlGetVersion(&mut version) } == 0 { return Some(version.build); }
+    }
+    None
+}
+
+/// Bundled ConPTY dir name for the current target arch. The nupkg ships
+/// per-arch binaries; an x64 conpty.dll cannot be loaded into an arm64
+/// process (and vice versa), so the subdir must match the target.
+#[cfg(windows)]
+fn arch_dir() -> &'static str {
+    match std::env::consts::ARCH {
+        "aarch64" => "win-arm64",
+        _ => "win-x64",
+    }
+}
+
 #[cfg(windows)]
 mod imp {
     use super::*;
@@ -77,12 +103,12 @@ mod imp {
             candidates.push(PathBuf::from(dir));
         }
         if let Some(dir) = resource_dir {
-            candidates.push(dir.join("resources").join("conpty").join("win-x64"));
-            candidates.push(dir.join("conpty").join("win-x64"));
+            candidates.push(dir.join("resources").join("conpty").join(arch_dir()));
+            candidates.push(dir.join("conpty").join(arch_dir()));
         }
         if let Ok(cwd) = std::env::current_dir() {
-            candidates.push(cwd.join("resources").join("conpty").join("win-x64"));
-            candidates.push(cwd.join("src-tauri").join("resources").join("conpty").join("win-x64"));
+            candidates.push(cwd.join("resources").join("conpty").join(arch_dir()));
+            candidates.push(cwd.join("src-tauri").join("resources").join("conpty").join(arch_dir()));
         }
         candidates.into_iter().find(|d| d.join("conpty.dll").is_file())
     }
@@ -120,7 +146,7 @@ mod tests {
         let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("resources")
             .join("conpty")
-            .join("win-x64");
+            .join(super::arch_dir());
         assert!(dir.join("conpty.dll").is_file(), "bundled conpty.dll missing");
         assert!(dir.join("OpenConsole.exe").is_file(), "bundled OpenConsole.exe missing");
         // Full end-to-end resolution: LoadLibraryW fails if the module or any

@@ -18,6 +18,7 @@ export async function terminalRequest(path: string, options?: RequestInit): Prom
 export function createTerminalWriter(id: string, onError: (error: Error) => void) {
   let pending = Promise.resolve();
   let stopped = false;
+  const replyRequests = new Set<AbortController>();
   let bufferedInput: { type: "input"; data: string } | null = null;
   const enqueue = (body: Record<string, unknown> | FormData | (() => Promise<Record<string, unknown>>)) => {
     if (stopped) return;
@@ -43,6 +44,24 @@ export function createTerminalWriter(id: string, onError: (error: Error) => void
     });
   };
   return {
+    reply(data: string) {
+      if (stopped) return;
+      // CLI probes have short deadlines. Do not queue responses behind resize,
+      // image uploads or animation-frame keystroke batching.
+      const controller = new AbortController();
+      replyRequests.add(controller);
+      oscTrace("http-reply", data, { term: id });
+      void terminalRequest(`/api/terminal/${encodeURIComponent(id)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "input", data }),
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]),
+      }).catch((error: Error) => {
+        if (stopped || controller.signal.aborted) return;
+        stopped = true;
+        onError(error);
+      }).finally(() => replyRequests.delete(controller));
+    },
     write(data: string) {
       if (stopped) return;
       for (const chunk of data.match(/[\s\S]{1,32768}/gu) ?? []) {
@@ -76,6 +95,11 @@ export function createTerminalWriter(id: string, onError: (error: Error) => void
       bufferedInput = null;
       enqueue({ type: "resize", cols, rows });
     },
-    stop() { stopped = true; return pending; },
+    stop() {
+      stopped = true;
+      for (const request of replyRequests) request.abort();
+      replyRequests.clear();
+      return pending;
+    },
   };
 }

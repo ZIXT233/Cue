@@ -46,7 +46,8 @@ async fn plan(ctx: Ctx<'_>, events: &'static [&'static str]) -> AppResult<Plan> 
     // file below, which is also where a foreign Cursor session finds them.
     plan.files.insert("hooks/hooks.json".into(), serde_json::json!({ "version": 1, "hooks": {} }).to_string());
     plan.files.insert("cursor-user-hooks.json".into(), serde_json::json!({ "version": 1, "hooks": hooks }).to_string());
-    plan.args.extend(["--plugin-dir".into(), ctx.host.root.to_string_lossy().into_owned()]);
+    // No --plugin-dir: the plugin manifest is empty and all lifecycle hooks
+    // are registered in the user config below. Loading it only adds CLI work.
     let path = if ctx.workspace.kind == "local" {
         user_hooks_path().to_string_lossy().into_owned()
     } else {
@@ -112,6 +113,19 @@ impl Harness for Cursor {
         }
     }
 
+    /// Remove the entries `global` merged in — the inverse of `merge_user_hooks`.
+    /// Foreign entries stay; events left empty drop out with them.
+    fn unglobal(&self, ctx: &GlobalCtx) {
+        let hook_path = ctx.hook_path("cursor");
+        let path = user_hooks_path();
+        let Ok(existing) = std::fs::read_to_string(&path) else { return };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&existing) else { return };
+        let Ok(cleaned) = unmerge_user_hooks(value, &hook_path) else { return };
+        if cleaned != existing {
+            let _ = atomic_write(&path, &serde_json::to_string_pretty(&cleaned).unwrap_or_default());
+        }
+    }
+
     fn launch_tweaks(&self) -> LaunchTweaks {
         LaunchTweaks {
             kitty_notifications: true,
@@ -131,12 +145,7 @@ impl Harness for Cursor {
     /// tool call, so the invocation is spelled to skip the interpreters.
     fn hook_command(&self, host: &Host, event: Option<&str>) -> String {
         if host.windows {
-            return [host.node.as_str(), host.hook_path.as_str()]
-                .into_iter()
-                .chain(event)
-                .map(|value| host.quote(value))
-                .collect::<Vec<_>>()
-                .join(" ");
+            return crate::harness::windows::windows_hook_command(&host.node, &host.hook_path, event);
         }
         host.generic_hook_command_with_prefix(event, "QUE_HARNESS_KIND=cursor ")
     }
@@ -582,6 +591,26 @@ fn is_owned_command(command: &str, hook_path: &str) -> bool {
     let units: Vec<u16> = bytes.chunks_exact(2).map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]])).collect();
     let script = String::from_utf16_lossy(&units);
     script.contains(hook_path) || pattern.is_match(&script)
+}
+
+/// Drop every group whose command belongs to Que's hook; events left empty come
+/// out with them — the inverse of `merge_user_hooks`.
+fn unmerge_user_hooks(mut value: serde_json::Value, hook_path: &str) -> AppResult<serde_json::Value> {
+    let hooks = value
+        .get_mut("hooks")
+        .and_then(|v| v.as_object_mut())
+        .ok_or_else(|| AppError::machine_detail("HARNESS_HOOKS_INVALID", "cursor"))?;
+    for (_, entries) in hooks.iter_mut() {
+        if let Some(list) = entries.as_array_mut() {
+            list.retain(|entry| {
+                !is_owned_command(entry.get("command").and_then(|c| c.as_str()).unwrap_or(""), hook_path)
+            });
+        }
+    }
+    if let Some(hooks) = value.get_mut("hooks").and_then(|v| v.as_object_mut()) {
+        hooks.retain(|_, entries| entries.as_array().is_some_and(|list| !list.is_empty()));
+    }
+    Ok(value)
 }
 
 /// Keep every foreign entry, drop Que's old ones, append the new ones.
