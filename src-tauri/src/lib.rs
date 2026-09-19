@@ -76,6 +76,13 @@ fn reveal_log(path: String) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("APPDIR").is_some() {
+        // AppImage hook forces X11; use native Wayland when available,
+        // with X11 retained as fallback.
+        std::env::set_var("GDK_BACKEND", "wayland,x11");
+    }
+
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default();
 
