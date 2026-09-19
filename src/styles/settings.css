@@ -849,13 +849,13 @@ html.dark .settings-dialog-surface {
 .settings-section-tab {
   position: relative;
   display: flex;
-  flex: 0 0 102px;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
   gap: 5px;
-  width: 102px;
+  min-width: 102px;
   height: 100%;
-  padding: 0 2px;
+  padding: 0 10px;
   border: 0;
   outline: none;
   background: transparent;
@@ -1478,8 +1478,9 @@ html.dark .settings-dialog-surface {
   color: #3fb950;
 }
 
-/* Unsupported: subtle neutral muted */
-.external-form-capsule.is-unsupported {
+/* Unsupported and unknown: subtle neutral muted. The wording distinguishes them. */
+.external-form-capsule.is-unsupported,
+.external-form-capsule.is-unknown {
   background: rgba(140, 149, 159, 0.1);
   border-color: rgba(140, 149, 159, 0.2);
   color: var(--text-dim);
@@ -1498,6 +1499,7 @@ html.dark .settings-dialog-surface {
   border-color: rgba(210, 153, 34, 0.35);
   color: #e3b341;
 }
+
 .settings-terminal .settings-general-section + .settings-general-section {
   margin-top: 24px;
   padding-top: 22px;

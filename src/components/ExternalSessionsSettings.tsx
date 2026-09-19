@@ -94,6 +94,7 @@ export function ExternalSessionsSettings() {
   const getStatusText = (status: FormSupportStatus) => {
     if (status === "supported") return t("settings.harnessForms.supported");
     if (status === "in_progress") return t("settings.harnessForms.inProgress");
+    if (status === "unknown") return t("settings.harnessForms.unknown");
     return t("settings.harnessForms.unsupported");
   };
 
@@ -165,16 +166,20 @@ export function ExternalSessionsSettings() {
                   status={harness.forms.cli}
                   statusLabel={getStatusText(harness.forms.cli)}
                 />
-                <FormCapsule
-                  formLabel={t("settings.harnessForms.desktop")}
-                  status={harness.forms.desktop}
-                  statusLabel={getStatusText(harness.forms.desktop)}
-                />
-                <FormCapsule
-                  formLabel={t("settings.harnessForms.vscode")}
-                  status={harness.forms.vscode}
-                  statusLabel={getStatusText(harness.forms.vscode)}
-                />
+                {harness.forms.desktop && (
+                  <FormCapsule
+                    formLabel={t("settings.harnessForms.desktop")}
+                    status={harness.forms.desktop}
+                    statusLabel={getStatusText(harness.forms.desktop)}
+                  />
+                )}
+                {harness.forms.vscode && (
+                  <FormCapsule
+                    formLabel={t("settings.harnessForms.vscode")}
+                    status={harness.forms.vscode}
+                    statusLabel={getStatusText(harness.forms.vscode)}
+                  />
+                )}
               </div>
             </div>
           );

@@ -1,7 +1,13 @@
 import type { HarnessId } from "./types";
 
 /** Support status of one external-session form factor. */
-export type FormSupportStatus = "supported" | "unsupported" | "in_progress";
+export type FormSupportStatus = "supported" | "unsupported" | "in_progress" | "unknown";
+export interface HarnessForms {
+  cli: FormSupportStatus;
+  /** Omit a form that the harness does not offer rather than labelling it unsupported. */
+  desktop?: FormSupportStatus;
+  vscode?: FormSupportStatus;
+}
 
 export interface HarnessCatalogEntry {
   id: HarnessId;
@@ -12,7 +18,7 @@ export interface HarnessCatalogEntry {
   /** Vendor line, shown in the external-sessions settings. */
   vendor?: string;
   iconId?: string;
-  forms?: { cli: FormSupportStatus; desktop: FormSupportStatus; vscode: FormSupportStatus };
+  forms?: HarnessForms;
   /** The terminal theme palette this harness paints itself in. */
   themeProfile?: "grok";
   /** Whether the PTY hides the cursor after ConPTY respawn (default true). */
@@ -27,15 +33,15 @@ export interface HarnessCatalogEntry {
  * adding one entry, mirroring the backend `kinds/<kind>.rs` registry.
  */
 export const harnessCatalog: HarnessCatalogEntry[] = [
-  { id: "codex", name: "Codex", description: "OpenAI · CLI", vendor: "OpenAI", iconId: "openai", forms: { cli: "supported", desktop: "unsupported", vscode: "supported" }, conptyCursorHide: false },
-  { id: "claude", name: "Claude Code", description: "Anthropic · CLI", vendor: "Anthropic", iconId: "anthropic", forms: { cli: "supported", desktop: "unsupported", vscode: "supported" } },
-  { id: "cursor", name: "Cursor Agent", description: "Cursor · CLI", vendor: "Cursor", iconId: "cursor", forms: { cli: "supported", desktop: "supported", vscode: "unsupported" } },
+  { id: "codex", name: "Codex", description: "OpenAI · CLI", vendor: "OpenAI", iconId: "openai", forms: { cli: "supported", desktop: "supported", vscode: "supported" }, conptyCursorHide: false },
+  { id: "claude", name: "Claude Code", description: "Anthropic · CLI", vendor: "Anthropic", iconId: "anthropic", forms: { cli: "supported", desktop: "supported", vscode: "supported" } },
+  { id: "cursor", name: "Cursor Agent", description: "Cursor · CLI", vendor: "Cursor", iconId: "cursor", forms: { cli: "supported", desktop: "supported" } },
   { id: "opencode", name: "OpenCode", description: "OpenCode · CLI", vendor: "OpenCode", iconId: "opencode", forms: { cli: "supported", desktop: "supported", vscode: "supported" } },
   { id: "antigravity", name: "Antigravity CLI", description: "Google · CLI", vendor: "Google", iconId: "google", forms: { cli: "supported", desktop: "supported", vscode: "supported" } },
-  { id: "pi", name: "Pi", description: "Pi · CLI", vendor: "Pi", iconId: "pi", forms: { cli: "supported", desktop: "unsupported", vscode: "unsupported" } },
-  { id: "omp", name: "Oh My Pi", description: "OMP · CLI", vendor: "Pi", iconId: "pi", forms: { cli: "supported", desktop: "unsupported", vscode: "unsupported" } },
-  { id: "codebuddy", name: "CodeBuddy", description: "Tencent · CLI", vendor: "Tencent", iconId: "codebuddy", forms: { cli: "supported", desktop: "unsupported", vscode: "unsupported" } },
-  { id: "grok", name: "Grok Build", description: "xAI · CLI", vendor: "xAI", iconId: "grok", forms: { cli: "supported", desktop: "unsupported", vscode: "unsupported" }, themeProfile: "grok" },
+  { id: "pi", name: "Pi", description: "Pi · CLI", vendor: "Pi", iconId: "pi", forms: { cli: "supported" } },
+  { id: "omp", name: "Oh My Pi", description: "OMP · CLI", vendor: "Pi", iconId: "pi", forms: { cli: "supported" } },
+  { id: "codebuddy", name: "CodeBuddy", description: "Tencent · CLI", vendor: "Tencent", iconId: "codebuddy", forms: { cli: "supported", desktop: "unsupported" } },
+  { id: "grok", name: "Grok Build", description: "xAI · CLI", vendor: "xAI", iconId: "grok", forms: { cli: "supported" }, themeProfile: "grok" },
   { id: "shell", name: "Shell", description: "纯终端，不响应 Agent 事件", focusReporting: false },
 ];
 
@@ -56,7 +62,7 @@ export interface ExternalHarnessEntry {
   name: string;
   vendor: string;
   iconId: string;
-  forms: { cli: FormSupportStatus; desktop: FormSupportStatus; vscode: FormSupportStatus };
+  forms: HarnessForms;
 }
 export const externalHarnesses: ExternalHarnessEntry[] = EXTERNAL_ORDER.map(id => {
   const meta = harnessMeta(id)!;
