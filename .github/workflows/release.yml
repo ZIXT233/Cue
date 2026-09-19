@@ -1,0 +1,84 @@
+name: Release Desktop App
+
+on:
+  push:
+    tags: ["v*"]
+
+# A release is only initiated by an explicit version tag. The Tauri action
+# creates or updates one draft release while the six matrix jobs upload assets.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: ${{ matrix.platform }} / ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos
+            arch: x64
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - platform: macos
+            arch: arm64
+            runner: macos-15
+            target: aarch64-apple-darwin
+          - platform: windows
+            arch: x64
+            runner: windows-2025
+            target: x86_64-pc-windows-msvc
+          - platform: windows
+            arch: arm64
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+          - platform: linux
+            arch: x64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - platform: linux
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Verify release version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: >-
+          node -e "const fs=require('node:fs'); const pkg=JSON.parse(fs.readFileSync('package.json')); const tauri=JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json')); const cargo=fs.readFileSync('src-tauri/Cargo.toml','utf8').match(/^version = \"([^\"]+)\"/m)?.[1]; const versions=[pkg.version,tauri.version,cargo]; if(new Set(versions).size !== 1 || process.env.RELEASE_TAG !== 'v'+tauri.version) { throw new Error('Version mismatch: tag='+process.env.RELEASE_TAG+', package='+pkg.version+', tauri='+tauri.version+', cargo='+cargo); }"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and upload release assets
+        uses: tauri-apps/tauri-action@v1.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: --target ${{ matrix.target }}
+          tagName: ${{ github.ref_name }}
+          releaseName: Que ${{ github.ref_name }}
+          releaseDraft: true
+          prerelease: false
+          releaseAssetNamePattern: Que-[platform]-[arch]-[bundle].[ext]
+          uploadUpdaterJson: false
+          retryAttempts: 3
